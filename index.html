@@ -4,117 +4,121 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Vasco's Collection Vault</title>
+
+  <!-- ============================================================
+    STEP 1: Fill in your Firebase config below.
+    Get it from: Firebase Console → Project Settings → Your Apps
+  ============================================================ -->
+  <script>
+    const FIREBASE_CONFIG = {
+      apiKey:            "AIzaSyD0X55TqxMi6d75PxeCjjluL2Gn_tsME_w",
+      authDomain:        "my-collection-f4327.firebaseapp.com",
+      projectId:         "my-collection-f4327",
+      storageBucket:     "my-collection-f4327.firebasestorage.app",
+      messagingSenderId: "379661358660",
+      appId:             "1:379661358660:web:58b2f4b0a313cf3c458e11"
+    };
+    const OWNER_EMAIL = "vascosiomobile@gmail.com";
+  </script>
+
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+
+  <!-- React + Babel -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #FAFAFA; }
     select, input, button { font-family: inherit; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { animation: spin 0.8s linear infinite; display: inline-block; }
   </style>
 </head>
 <body>
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useMemo, useRef, useCallback } = React;
+    const { useState, useMemo, useRef, useCallback, useEffect } = React;
 
-    const CATEGORIES = ["All", "NBA Card", "Pokemon Card", "Jersey", "Toy", "Other"];
-    const CONDITIONS = ["Mint", "Near Mint", "Excellent", "Good", "Fair"];
+    // ── Firebase init ──────────────────────────────────────────
+    const app  = firebase.initializeApp(FIREBASE_CONFIG);
+    const db   = firebase.firestore();
+    const auth = firebase.auth();
+    const provider = new firebase.auth.GoogleAuthProvider();
+    const ITEMS_COL = "items";
 
-    const INITIAL_ITEMS = [
-      { id: 1, name: "Kobe Bryant 1996-97 Topps Chrome RC", category: "NBA Card", condition: "Near Mint", value: 1200, currency: "USD", year: 1996, notes: "PSA 8", image: null, dateAdded: "2024-01-15" },
-      { id: 2, name: "LeBron James 2003-04 Topps Chrome RC", category: "NBA Card", condition: "Excellent", value: 850, currency: "USD", year: 2003, notes: "BGS 8.5", image: null, dateAdded: "2024-02-20" },
-      { id: 3, name: "Charizard Base Set Holo", category: "Pokemon Card", condition: "Near Mint", value: 600, currency: "USD", year: 1999, notes: "Shadowless", image: null, dateAdded: "2024-03-05" },
-      { id: 4, name: "Pikachu Illustrator", category: "Pokemon Card", condition: "Good", value: 3000, currency: "USD", year: 1998, notes: "PSA 6", image: null, dateAdded: "2024-01-28" },
-      { id: 5, name: "Michael Jordan Bulls #23 Jersey", category: "Jersey", condition: "Mint", value: 2500, currency: "USD", year: 1997, notes: "Game worn replica, signed", image: null, dateAdded: "2024-04-10" },
-      { id: 6, name: "Kobe Bryant Lakers #24 Jersey", category: "Jersey", condition: "Near Mint", value: 1800, currency: "USD", year: 2008, notes: "Authentic", image: null, dateAdded: "2024-02-14" },
-      { id: 7, name: "LEGO Star Wars Millennium Falcon", category: "Toy", condition: "Mint", value: 850, currency: "USD", year: 2017, notes: "Sealed, #75192", image: null, dateAdded: "2024-05-01" },
-      { id: 8, name: "Hot Wheels Redline 1969 Camaro", category: "Toy", condition: "Good", value: 220, currency: "USD", year: 1969, notes: "Original paint", image: null, dateAdded: "2024-03-22" },
-    ];
+    // ── Image compression ──────────────────────────────────────
+    function compressImage(dataUrl, maxWidth = 600, quality = 0.78) {
+      return new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => {
+          let w = img.width, h = img.height;
+          if (w > maxWidth) { h = Math.round(h * maxWidth / w); w = maxWidth; }
+          const canvas = document.createElement("canvas");
+          canvas.width = w; canvas.height = h;
+          canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL("image/jpeg", quality));
+        };
+        img.src = dataUrl;
+      });
+    }
 
-    const CATEGORY_ICONS = {
-      "NBA Card": "🏀", "Pokemon Card": "⚡", "Jersey": "👕",
-      "Toy": "🎮", "Other": "📦", "All": "✨",
-    };
+    // ── Constants ──────────────────────────────────────────────
+    const CATEGORIES = ["All","NBA Card","Pokemon Card","Jersey","Toy","Other"];
+    const CONDITIONS  = ["Mint","Near Mint","Excellent","Good","Fair"];
 
-    const CATEGORY_COLORS = {
-      "NBA Card": "#E8522A", "Pokemon Card": "#F5C518",
-      "Jersey": "#2563EB", "Toy": "#16A34A", "Other": "#9333EA",
-    };
+    const CATEGORY_ICONS  = { "NBA Card":"🏀","Pokemon Card":"⚡","Jersey":"👕","Toy":"🎮","Other":"📦","All":"✨" };
+    const CATEGORY_COLORS = { "NBA Card":"#E8522A","Pokemon Card":"#F5C518","Jersey":"#2563EB","Toy":"#16A34A","Other":"#9333EA" };
 
     function formatCurrency(val) {
-      return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(val);
+      return new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",maximumFractionDigits:0}).format(val);
     }
 
+    // ── Components ─────────────────────────────────────────────
     function ConditionBadge({ condition }) {
       const colors = {
-        Mint: { bg: "#DCFCE7", text: "#166534" },
-        "Near Mint": { bg: "#DBEAFE", text: "#1E40AF" },
-        Excellent: { bg: "#F3E8FF", text: "#6B21A8" },
-        Good: { bg: "#FEF3C7", text: "#92400E" },
-        Fair: { bg: "#FEE2E2", text: "#991B1B" },
+        Mint:{bg:"#DCFCE7",text:"#166534"}, "Near Mint":{bg:"#DBEAFE",text:"#1E40AF"},
+        Excellent:{bg:"#F3E8FF",text:"#6B21A8"}, Good:{bg:"#FEF3C7",text:"#92400E"},
+        Fair:{bg:"#FEE2E2",text:"#991B1B"},
       };
-      const c = colors[condition] || { bg: "#F3F4F6", text: "#374151" };
-      return (
-        <span style={{ background: c.bg, color: c.text, padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600, letterSpacing: 0.3 }}>
-          {condition}
-        </span>
-      );
+      const c = colors[condition] || {bg:"#F3F4F6",text:"#374151"};
+      return <span style={{background:c.bg,color:c.text,padding:"2px 10px",borderRadius:20,fontSize:11,fontWeight:600}}>{condition}</span>;
     }
 
-    function ItemCard({ item, onEdit, onDelete }) {
+    function ItemCard({ item, isAdmin, onEdit, onDelete }) {
       const catColor = CATEGORY_COLORS[item.category] || "#6B7280";
       return (
-        <div style={{
-          background: "#fff", borderRadius: 16, border: "1px solid #F0F0F0",
-          overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,0.05)",
-          transition: "all 0.2s ease", cursor: "pointer",
-        }}
-          onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 8px 30px rgba(0,0,0,0.12)"; e.currentTarget.style.transform = "translateY(-3px)"; }}
-          onMouseLeave={e => { e.currentTarget.style.boxShadow = "0 2px 12px rgba(0,0,0,0.05)"; e.currentTarget.style.transform = "translateY(0)"; }}
-        >
-          <div style={{
-            height: 180,
-            background: item.image ? "transparent" : `linear-gradient(135deg, ${catColor}15, ${catColor}30)`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            position: "relative", overflow: "hidden",
-          }}>
+        <div style={{background:"#fff",borderRadius:16,border:"1px solid #F0F0F0",overflow:"hidden",boxShadow:"0 2px 12px rgba(0,0,0,0.05)",transition:"all 0.2s ease"}}
+          onMouseEnter={e=>{e.currentTarget.style.boxShadow="0 8px 30px rgba(0,0,0,0.12)";e.currentTarget.style.transform="translateY(-3px)";}}
+          onMouseLeave={e=>{e.currentTarget.style.boxShadow="0 2px 12px rgba(0,0,0,0.05)";e.currentTarget.style.transform="translateY(0)";}}>
+          <div style={{height:180,background:item.image?"transparent":`linear-gradient(135deg,${catColor}15,${catColor}30)`,display:"flex",alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden"}}>
             {item.image
-              ? <img src={item.image} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-              : <span style={{ fontSize: 52, opacity: 0.6 }}>{CATEGORY_ICONS[item.category] || "📦"}</span>
-            }
-            <div style={{
-              position: "absolute", top: 10, right: 10,
-              background: item.image ? "rgba(0,0,0,0.55)" : catColor,
-              color: "#fff", borderRadius: 20, padding: "3px 10px",
-              fontSize: 11, fontWeight: 700, letterSpacing: 0.5,
-            }}>{item.category}</div>
+              ? <img src={item.image} alt={item.name} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+              : <span style={{fontSize:52,opacity:0.6}}>{CATEGORY_ICONS[item.category]||"📦"}</span>}
+            <div style={{position:"absolute",top:10,right:10,background:item.image?"rgba(0,0,0,0.55)":catColor,color:"#fff",borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>
+              {item.category}
+            </div>
           </div>
-
-          <div style={{ padding: "16px 18px 18px" }}>
-            <div style={{ fontWeight: 700, fontSize: 14, color: "#111", lineHeight: 1.4, marginBottom: 6, minHeight: 38 }}>
-              {item.name}
+          <div style={{padding:"16px 18px 18px"}}>
+            <div style={{fontWeight:700,fontSize:14,color:"#111",lineHeight:1.4,marginBottom:6,minHeight:38}}>{item.name}</div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+              <ConditionBadge condition={item.condition}/>
+              <span style={{fontSize:12,color:"#9CA3AF"}}>{item.year}</span>
             </div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-              <ConditionBadge condition={item.condition} />
-              <span style={{ fontSize: 12, color: "#9CA3AF" }}>{item.year}</span>
-            </div>
-            {item.notes && (
-              <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 10, fontStyle: "italic" }}>{item.notes}</div>
-            )}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: "1px solid #F5F5F5", paddingTop: 12, marginTop: 4 }}>
-              <div style={{ fontSize: 20, fontWeight: 800, color: "#111", letterSpacing: -0.5 }}>{formatCurrency(item.value)}</div>
-              <div style={{ display: "flex", gap: 6 }}>
-                <button onClick={(e) => { e.stopPropagation(); onEdit(item); }} style={{
-                  background: "#F8F8F8", border: "none", borderRadius: 8, padding: "6px 12px",
-                  fontSize: 12, color: "#374151", cursor: "pointer", fontWeight: 500,
-                }}>Edit</button>
-                <button onClick={(e) => { e.stopPropagation(); onDelete(item.id); }} style={{
-                  background: "#FEF2F2", border: "none", borderRadius: 8, padding: "6px 12px",
-                  fontSize: 12, color: "#DC2626", cursor: "pointer", fontWeight: 500,
-                }}>✕</button>
-              </div>
+            {item.notes && <div style={{fontSize:12,color:"#6B7280",marginBottom:10,fontStyle:"italic"}}>{item.notes}</div>}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",borderTop:"1px solid #F5F5F5",paddingTop:12,marginTop:4}}>
+              <div style={{fontSize:20,fontWeight:800,color:"#111"}}>{formatCurrency(item.value)}</div>
+              {isAdmin && (
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={e=>{e.stopPropagation();onEdit(item);}} style={{background:"#F8F8F8",border:"none",borderRadius:8,padding:"6px 12px",fontSize:12,color:"#374151",cursor:"pointer",fontWeight:500}}>Edit</button>
+                  <button onClick={e=>{e.stopPropagation();onDelete(item.id);}} style={{background:"#FEF2F2",border:"none",borderRadius:8,padding:"6px 12px",fontSize:12,color:"#DC2626",cursor:"pointer",fontWeight:500}}>✕</button>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -124,436 +128,385 @@
     function ImageUploader({ value, onChange }) {
       const inputRef = useRef(null);
       const [dragging, setDragging] = useState(false);
+      const [compressing, setCompressing] = useState(false);
 
-      const processFile = useCallback((file) => {
+      const processFile = useCallback(async (file) => {
         if (!file || !file.type.startsWith("image/")) return;
+        setCompressing(true);
         const reader = new FileReader();
-        reader.onload = (e) => onChange(e.target.result);
+        reader.onload = async (e) => {
+          const compressed = await compressImage(e.target.result);
+          onChange(compressed);
+          setCompressing(false);
+        };
         reader.readAsDataURL(file);
       }, [onChange]);
 
-      const handleDrop = useCallback((e) => {
-        e.preventDefault();
-        setDragging(false);
-        processFile(e.dataTransfer.files[0]);
-      }, [processFile]);
-
       return (
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8 }}>Photo</label>
+        <div style={{marginBottom:20}}>
+          <label style={{display:"block",fontSize:13,fontWeight:600,color:"#374151",marginBottom:8}}>Photo</label>
           {value ? (
-            <div style={{ position: "relative", borderRadius: 12, overflow: "hidden", height: 180, background: "#F3F4F6" }}>
-              <img src={value} alt="preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-              <div style={{
-                position: "absolute", inset: 0, background: "rgba(0,0,0,0)",
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 10, transition: "background 0.2s",
-              }}
-                onMouseEnter={e => e.currentTarget.style.background = "rgba(0,0,0,0.45)"}
-                onMouseLeave={e => e.currentTarget.style.background = "rgba(0,0,0,0)"}
-              >
-                <button onClick={() => inputRef.current.click()} style={{
-                  background: "rgba(255,255,255,0.9)", border: "none", borderRadius: 8,
-                  padding: "8px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer", color: "#111",
-                }}>Change Photo</button>
-                <button onClick={() => onChange(null)} style={{
-                  background: "rgba(220,38,38,0.85)", border: "none", borderRadius: 8,
-                  padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", color: "#fff",
-                }}>Remove</button>
+            <div style={{position:"relative",borderRadius:12,overflow:"hidden",height:180,background:"#F3F4F6"}}>
+              <img src={value} alt="preview" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+              <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0)",display:"flex",alignItems:"center",justifyContent:"center",gap:10,transition:"background 0.2s"}}
+                onMouseEnter={e=>e.currentTarget.style.background="rgba(0,0,0,0.45)"}
+                onMouseLeave={e=>e.currentTarget.style.background="rgba(0,0,0,0)"}>
+                <button onClick={()=>inputRef.current.click()} style={{background:"rgba(255,255,255,0.9)",border:"none",borderRadius:8,padding:"8px 16px",fontSize:12,fontWeight:700,cursor:"pointer",color:"#111"}}>Change</button>
+                <button onClick={()=>onChange(null)} style={{background:"rgba(220,38,38,0.85)",border:"none",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer",color:"#fff"}}>Remove</button>
               </div>
             </div>
           ) : (
-            <div
-              onClick={() => inputRef.current.click()}
-              onDragOver={e => { e.preventDefault(); setDragging(true); }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={handleDrop}
-              style={{
-                border: `2px dashed ${dragging ? "#111" : "#D1D5DB"}`,
-                borderRadius: 12, height: 140,
-                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-                cursor: "pointer", background: dragging ? "#F9F9F9" : "#FAFAFA",
-                transition: "all 0.2s", gap: 8,
-              }}
-            >
-              <span style={{ fontSize: 32 }}>🖼️</span>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Click to upload or drag & drop</div>
-              <div style={{ fontSize: 11, color: "#9CA3AF" }}>JPG, PNG, WEBP supported</div>
+            <div onClick={()=>inputRef.current.click()}
+              onDragOver={e=>{e.preventDefault();setDragging(true);}}
+              onDragLeave={()=>setDragging(false)}
+              onDrop={e=>{e.preventDefault();setDragging(false);processFile(e.dataTransfer.files[0]);}}
+              style={{border:`2px dashed ${dragging?"#111":"#D1D5DB"}`,borderRadius:12,height:140,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",background:dragging?"#F9F9F9":"#FAFAFA",gap:8}}>
+              {compressing
+                ? <><span className="spinner" style={{fontSize:24}}>⏳</span><div style={{fontSize:13,color:"#9CA3AF"}}>Compressing…</div></>
+                : <><span style={{fontSize:32}}>🖼️</span><div style={{fontSize:13,fontWeight:600,color:"#374151"}}>Click to upload or drag & drop</div><div style={{fontSize:11,color:"#9CA3AF"}}>JPG, PNG, WEBP</div></>
+              }
             </div>
           )}
-          <input ref={inputRef} type="file" accept="image/*" style={{ display: "none" }}
-            onChange={e => processFile(e.target.files[0])} />
+          <input ref={inputRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>processFile(e.target.files[0])}/>
         </div>
       );
     }
 
     function Modal({ item, onSave, onClose }) {
-      const [form, setForm] = useState(item || {
-        name: "", category: "NBA Card", condition: "Near Mint",
-        value: "", year: new Date().getFullYear(), notes: "", currency: "USD", image: null,
-      });
-      const handleChange = (k, v) => setForm(f => ({ ...f, [k]: v }));
+      const [form, setForm] = useState(item || {name:"",category:"NBA Card",condition:"Near Mint",value:"",year:new Date().getFullYear(),notes:"",image:null});
+      const [saving, setSaving] = useState(false);
+      const handleChange = (k,v) => setForm(f=>({...f,[k]:v}));
+
+      const handleSave = async () => {
+        if (!form.name || !form.value) return alert("Please fill in name and value.");
+        setSaving(true);
+        await onSave({...form, value:parseFloat(form.value), year:parseInt(form.year)||new Date().getFullYear()});
+        setSaving(false);
+      };
 
       return (
-        <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", backdropFilter: "blur(4px)",
-          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20,
-        }}>
-          <div style={{
-            background: "#fff", borderRadius: 20, padding: 32, width: "100%", maxWidth: 480,
-            boxShadow: "0 20px 60px rgba(0,0,0,0.15)", maxHeight: "90vh", overflowY: "auto",
-          }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
-              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: "#111" }}>
-                {item && item.id ? "Edit Item" : "Add New Item"}
-              </h2>
-              <button onClick={onClose} style={{ background: "#F3F4F6", border: "none", borderRadius: 8, width: 32, height: 32, cursor: "pointer", fontSize: 16, color: "#6B7280" }}>✕</button>
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",backdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
+          <div style={{background:"#fff",borderRadius:20,padding:32,width:"100%",maxWidth:480,boxShadow:"0 20px 60px rgba(0,0,0,0.15)",maxHeight:"90vh",overflowY:"auto"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:24}}>
+              <h2 style={{margin:0,fontSize:20,fontWeight:800,color:"#111"}}>{item&&item.id?"Edit Item":"Add New Item"}</h2>
+              <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:8,width:32,height:32,cursor:"pointer",fontSize:16,color:"#6B7280"}}>✕</button>
             </div>
 
-            <ImageUploader value={form.image} onChange={v => handleChange("image", v)} />
+            <ImageUploader value={form.image} onChange={v=>handleChange("image",v)}/>
 
-            {[
-              { label: "Item Name", key: "name", type: "text", placeholder: "e.g. Kobe Bryant RC" },
-              { label: "Year", key: "year", type: "number", placeholder: "e.g. 1996" },
-              { label: "Value (USD)", key: "value", type: "number", placeholder: "e.g. 500" },
-              { label: "Notes", key: "notes", type: "text", placeholder: "e.g. PSA 9, Holo" },
-            ].map(f => (
-              <div key={f.key} style={{ marginBottom: 16 }}>
-                <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>{f.label}</label>
-                <input type={f.type} value={form[f.key] || ""} placeholder={f.placeholder}
-                  onChange={e => handleChange(f.key, e.target.value)}
-                  style={{
-                    width: "100%", padding: "10px 14px", borderRadius: 10, border: "1.5px solid #E5E7EB",
-                    fontSize: 14, outline: "none", boxSizing: "border-box",
-                  }}
-                  onFocus={e => e.target.style.borderColor = "#111"}
-                  onBlur={e => e.target.style.borderColor = "#E5E7EB"}
-                />
+            {[{label:"Item Name",key:"name",type:"text",placeholder:"e.g. Kobe Bryant RC"},
+              {label:"Year",key:"year",type:"number",placeholder:"e.g. 1996"},
+              {label:"Value (USD)",key:"value",type:"number",placeholder:"e.g. 500"},
+              {label:"Notes",key:"notes",type:"text",placeholder:"e.g. PSA 9, Holo"}
+            ].map(f=>(
+              <div key={f.key} style={{marginBottom:16}}>
+                <label style={{display:"block",fontSize:13,fontWeight:600,color:"#374151",marginBottom:6}}>{f.label}</label>
+                <input type={f.type} value={form[f.key]||""} placeholder={f.placeholder}
+                  onChange={e=>handleChange(f.key,e.target.value)}
+                  style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1.5px solid #E5E7EB",fontSize:14,outline:"none",boxSizing:"border-box"}}
+                  onFocus={e=>e.target.style.borderColor="#111"} onBlur={e=>e.target.style.borderColor="#E5E7EB"}/>
               </div>
             ))}
 
-            <div style={{ marginBottom: 16 }}>
-              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Category</label>
-              <select value={form.category} onChange={e => handleChange("category", e.target.value)}
-                style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1.5px solid #E5E7EB", fontSize: 14, background: "#fff", cursor: "pointer" }}>
-                {CATEGORIES.filter(c => c !== "All").map(c => <option key={c}>{c}</option>)}
+            <div style={{marginBottom:16}}>
+              <label style={{display:"block",fontSize:13,fontWeight:600,color:"#374151",marginBottom:6}}>Category</label>
+              <select value={form.category} onChange={e=>handleChange("category",e.target.value)}
+                style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1.5px solid #E5E7EB",fontSize:14,background:"#fff",cursor:"pointer"}}>
+                {CATEGORIES.filter(c=>c!=="All").map(c=><option key={c}>{c}</option>)}
               </select>
             </div>
 
-            <div style={{ marginBottom: 24 }}>
-              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Condition</label>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {CONDITIONS.map(c => (
-                  <button key={c} onClick={() => handleChange("condition", c)} style={{
-                    padding: "7px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: "pointer",
-                    border: form.condition === c ? "2px solid #111" : "1.5px solid #E5E7EB",
-                    background: form.condition === c ? "#111" : "#fff",
-                    color: form.condition === c ? "#fff" : "#374151",
-                    transition: "all 0.15s",
-                  }}>{c}</button>
+            <div style={{marginBottom:24}}>
+              <label style={{display:"block",fontSize:13,fontWeight:600,color:"#374151",marginBottom:6}}>Condition</label>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {CONDITIONS.map(c=>(
+                  <button key={c} onClick={()=>handleChange("condition",c)} style={{padding:"7px 14px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",border:form.condition===c?"2px solid #111":"1.5px solid #E5E7EB",background:form.condition===c?"#111":"#fff",color:form.condition===c?"#fff":"#374151"}}>{c}</button>
                 ))}
               </div>
             </div>
 
-            <button onClick={() => {
-              if (!form.name || !form.value) return alert("Please fill in name and value.");
-              onSave({ ...form, value: parseFloat(form.value), year: parseInt(form.year) || new Date().getFullYear() });
-            }} style={{
-              width: "100%", padding: "13px", background: "#111", color: "#fff",
-              border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: "pointer",
-            }}>
-              {item && item.id ? "Save Changes" : "Add to Collection"}
+            <button onClick={handleSave} disabled={saving} style={{width:"100%",padding:"13px",background:saving?"#666":"#111",color:"#fff",border:"none",borderRadius:12,fontSize:15,fontWeight:700,cursor:saving?"not-allowed":"pointer"}}>
+              {saving ? "Saving…" : (item&&item.id?"Save Changes":"Add to Collection")}
             </button>
           </div>
         </div>
       );
     }
 
+    // ── Main App ───────────────────────────────────────────────
     function App() {
-      const [items, setItems] = useState(INITIAL_ITEMS);
+      const [items,     setItems]     = useState([]);
+      const [loading,   setLoading]   = useState(true);
+      const [user,      setUser]      = useState(null);
+      const [authLoading, setAuthLoading] = useState(true);
       const [selectedCat, setSelectedCat] = useState("All");
-      const [search, setSearch] = useState("");
-      const [sortBy, setSortBy] = useState("dateAdded");
-      const [sortDir, setSortDir] = useState("desc");
-      const [modal, setModal] = useState(null);
-      const [viewMode, setViewMode] = useState("grid");
+      const [search,    setSearch]    = useState("");
+      const [sortBy,    setSortBy]    = useState("dateAdded");
+      const [sortDir,   setSortDir]   = useState("desc");
+      const [modal,     setModal]     = useState(null);
+      const [viewMode,  setViewMode]  = useState("grid");
+
+      const isAdmin = user && user.email === OWNER_EMAIL;
+
+      // Auth listener
+      useEffect(() => {
+        return auth.onAuthStateChanged(u => { setUser(u); setAuthLoading(false); });
+      }, []);
+
+      // Firestore real-time listener
+      useEffect(() => {
+        const unsub = db.collection(ITEMS_COL)
+          .orderBy("dateAdded","desc")
+          .onSnapshot(snap => {
+            setItems(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+            setLoading(false);
+          }, err => {
+            console.error(err);
+            setLoading(false);
+          });
+        return unsub;
+      }, []);
+
+      const handleSignIn  = () => auth.signInWithPopup(provider);
+      const handleSignOut = () => auth.signOut();
+
+      const handleSave = async (form) => {
+        const data = { ...form };
+        delete data.id;
+        if (form.id) {
+          await db.collection(ITEMS_COL).doc(form.id).set(data);
+        } else {
+          await db.collection(ITEMS_COL).add({ ...data, dateAdded: new Date().toISOString().slice(0,10) });
+        }
+        setModal(null);
+      };
+
+      const handleDelete = async (id) => {
+        if (window.confirm("Remove this item from your collection?")) {
+          await db.collection(ITEMS_COL).doc(id).delete();
+        }
+      };
 
       const filtered = useMemo(() => {
         let arr = items;
         if (selectedCat !== "All") arr = arr.filter(i => i.category === selectedCat);
         if (search.trim()) {
           const s = search.toLowerCase();
-          arr = arr.filter(i => i.name.toLowerCase().includes(s) || (i.notes && i.notes.toLowerCase().includes(s)) || String(i.year).includes(s));
+          arr = arr.filter(i => i.name.toLowerCase().includes(s) || (i.notes&&i.notes.toLowerCase().includes(s)) || String(i.year).includes(s));
         }
-        arr = [...arr].sort((a, b) => {
+        return [...arr].sort((a,b) => {
           let va = a[sortBy], vb = b[sortBy];
-          if (typeof va === "string") { va = va.toLowerCase(); vb = vb.toLowerCase(); }
-          if (va < vb) return sortDir === "asc" ? -1 : 1;
-          if (va > vb) return sortDir === "asc" ? 1 : -1;
+          if (typeof va==="string") { va=va.toLowerCase(); vb=vb.toLowerCase(); }
+          if (va<vb) return sortDir==="asc"?-1:1;
+          if (va>vb) return sortDir==="asc"?1:-1;
           return 0;
         });
-        return arr;
       }, [items, selectedCat, search, sortBy, sortDir]);
 
       const stats = useMemo(() => {
-        const totalValue = items.reduce((s, i) => s + i.value, 0);
+        const totalValue = items.reduce((s,i)=>s+i.value,0);
         const byCat = {};
-        CATEGORIES.filter(c => c !== "All").forEach(c => {
-          const ci = items.filter(i => i.category === c);
-          byCat[c] = { count: ci.length, value: ci.reduce((s, i) => s + i.value, 0) };
+        CATEGORIES.filter(c=>c!=="All").forEach(c=>{
+          const ci = items.filter(i=>i.category===c);
+          byCat[c] = { count:ci.length, value:ci.reduce((s,i)=>s+i.value,0) };
         });
-        const topItem = items.length ? items.reduce((a, b) => a.value > b.value ? a : b) : null;
-        return { totalValue, byCat, topItem, total: items.length };
+        const topItem = items.length ? items.reduce((a,b)=>a.value>b.value?a:b) : null;
+        return { totalValue, byCat, topItem, total:items.length };
       }, [items]);
 
-      const handleSave = (form) => {
-        if (form.id) {
-          setItems(prev => prev.map(i => i.id === form.id ? { ...form } : i));
-        } else {
-          setItems(prev => [...prev, { ...form, id: Date.now(), dateAdded: new Date().toISOString().slice(0, 10) }]);
-        }
-        setModal(null);
-      };
-
-      const handleDelete = (id) => {
-        if (window.confirm("Remove this item from your collection?")) {
-          setItems(prev => prev.filter(i => i.id !== id));
-        }
-      };
-
-      const toggleSort = (field) => {
-        if (sortBy === field) setSortDir(d => d === "asc" ? "desc" : "asc");
-        else { setSortBy(field); setSortDir("desc"); }
-      };
-
       return (
-        <div style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", background: "#FAFAFA", minHeight: "100vh", color: "#111" }}>
+        <div style={{fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",background:"#FAFAFA",minHeight:"100vh",color:"#111"}}>
+
           {/* Header */}
-          <div style={{ background: "#fff", borderBottom: "1px solid #F0F0F0", position: "sticky", top: 0, zIndex: 100 }}>
-            <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 24px" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 64 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <div style={{ width: 36, height: 36, background: "#111", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🏆</div>
+          <div style={{background:"#fff",borderBottom:"1px solid #F0F0F0",position:"sticky",top:0,zIndex:100}}>
+            <div style={{maxWidth:1200,margin:"0 auto",padding:"0 24px"}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",height:64}}>
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{width:36,height:36,background:"#111",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🏆</div>
                   <div>
-                    <div style={{ fontWeight: 800, fontSize: 17, letterSpacing: -0.3 }}>My Collection</div>
-                    <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, marginTop: -2 }}>Vasco's Collection Vault</div>
+                    <div style={{fontWeight:800,fontSize:17,letterSpacing:-0.3}}>My Collection</div>
+                    <div style={{fontSize:11,color:"#9CA3AF",fontWeight:500,marginTop:-2}}>Vasco's Collection Vault</div>
                   </div>
                 </div>
-                <button onClick={() => setModal("add")} style={{
-                  background: "#111", color: "#fff", border: "none", borderRadius: 10,
-                  padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer",
-                  display: "flex", alignItems: "center", gap: 6,
-                }}>
-                  <span style={{ fontSize: 16 }}>+</span> Add Item
-                </button>
+
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  {!authLoading && (
+                    isAdmin ? (
+                      <>
+                        <button onClick={()=>setModal("add")} style={{background:"#111",color:"#fff",border:"none",borderRadius:10,padding:"9px 18px",fontSize:13,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:16}}>+</span> Add Item
+                        </button>
+                        <button onClick={handleSignOut} style={{background:"#F3F4F6",color:"#374151",border:"none",borderRadius:10,padding:"9px 14px",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
+                          <img src={user.photoURL} style={{width:20,height:20,borderRadius:"50%"}} alt=""/> Sign Out
+                        </button>
+                      </>
+                    ) : (
+                      <button onClick={handleSignIn} style={{background:"#F3F4F6",color:"#374151",border:"1.5px solid #E5E7EB",borderRadius:10,padding:"8px 16px",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:8}}>
+                        <span>🔐</span> Admin Login
+                      </button>
+                    )
+                  )}
+                </div>
               </div>
             </div>
           </div>
 
-          <div style={{ maxWidth: 1200, margin: "0 auto", padding: "28px 24px" }}>
+          <div style={{maxWidth:1200,margin:"0 auto",padding:"28px 24px"}}>
 
-            {/* Stats Row */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16, marginBottom: 28 }}>
-              {[
-                { label: "Total Items", value: stats.total, sub: "in collection", icon: "📦", color: "#111" },
-                { label: "Portfolio Value", value: formatCurrency(stats.totalValue), sub: "estimated", icon: "💰", color: "#16A34A" },
-                { label: "Top Item", value: stats.topItem ? stats.topItem.name.slice(0, 22) + (stats.topItem.name.length > 22 ? "…" : "") : "—", sub: stats.topItem ? formatCurrency(stats.topItem.value) : "", icon: "⭐", color: "#E8522A" },
-                { label: "Categories", value: CATEGORIES.filter(c => c !== "All" && stats.byCat[c] && stats.byCat[c].count > 0).length, sub: "active", icon: "🗂️", color: "#2563EB" },
-              ].map(s => (
-                <div key={s.label} style={{ background: "#fff", borderRadius: 16, padding: "20px 22px", border: "1px solid #F0F0F0", boxShadow: "0 1px 8px rgba(0,0,0,0.04)" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: 0.8 }}>{s.label}</span>
-                    <span style={{ fontSize: 20 }}>{s.icon}</span>
-                  </div>
-                  <div style={{ fontSize: 26, fontWeight: 800, color: s.color, letterSpacing: -1, lineHeight: 1 }}>{s.value}</div>
-                  {s.sub && <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 4, fontWeight: 500 }}>{s.sub}</div>}
-                </div>
-              ))}
-            </div>
-
-            {/* Category Breakdown */}
-            <div style={{ background: "#fff", borderRadius: 16, padding: "20px 22px", border: "1px solid #F0F0F0", marginBottom: 28, boxShadow: "0 1px 8px rgba(0,0,0,0.04)" }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#111", marginBottom: 14 }}>Collection Breakdown</div>
-              <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-                {CATEGORIES.filter(c => c !== "All").map(c => {
-                  const d = stats.byCat[c];
-                  if (!d || d.count === 0) return null;
-                  const pct = stats.total > 0 ? Math.round((d.count / stats.total) * 100) : 0;
-                  return (
-                    <div key={c} style={{ flex: "1 1 140px", minWidth: 120 }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: "#374151", display: "flex", alignItems: "center", gap: 5 }}>
-                          <span>{CATEGORY_ICONS[c]}</span> {c}
-                        </div>
-                        <span style={{ fontSize: 11, color: "#9CA3AF" }}>{d.count} items</span>
-                      </div>
-                      <div style={{ height: 5, background: "#F3F4F6", borderRadius: 10, overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${pct}%`, background: CATEGORY_COLORS[c] || "#111", borderRadius: 10 }} />
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5 }}>
-                        <span style={{ fontSize: 11, color: "#9CA3AF" }}>{pct}%</span>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: CATEGORY_COLORS[c] }}>{formatCurrency(d.value)}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Filters */}
-            <div style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
-              <div style={{ position: "relative", flex: "1 1 240px", minWidth: 200 }}>
-                <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14, color: "#9CA3AF" }}>🔍</span>
-                <input value={search} onChange={e => setSearch(e.target.value)}
-                  placeholder="Search by name, notes, year..."
-                  style={{ width: "100%", padding: "10px 14px 10px 36px", borderRadius: 10, border: "1.5px solid #E5E7EB", fontSize: 13, background: "#fff", outline: "none", boxSizing: "border-box" }}
-                />
-              </div>
-              <select value={`${sortBy}-${sortDir}`} onChange={e => {
-                const parts = e.target.value.split("-");
-                const dir = parts.pop();
-                const field = parts.join("-");
-                setSortBy(field); setSortDir(dir);
-              }} style={{ padding: "10px 14px", borderRadius: 10, border: "1.5px solid #E5E7EB", fontSize: 13, background: "#fff", cursor: "pointer", outline: "none" }}>
-                <option value="value-desc">Value: High → Low</option>
-                <option value="value-asc">Value: Low → High</option>
-                <option value="name-asc">Name: A → Z</option>
-                <option value="dateAdded-desc">Newest First</option>
-                <option value="year-desc">Year: Newest</option>
-                <option value="year-asc">Year: Oldest</option>
-              </select>
-              <div style={{ display: "flex", background: "#F3F4F6", borderRadius: 10, padding: 3, gap: 2 }}>
-                {[["grid", "⊞"], ["list", "☰"]].map(([v, icon]) => (
-                  <button key={v} onClick={() => setViewMode(v)} style={{
-                    background: viewMode === v ? "#fff" : "transparent",
-                    border: "none", borderRadius: 8, padding: "6px 12px",
-                    fontSize: 14, cursor: "pointer", color: viewMode === v ? "#111" : "#9CA3AF",
-                    boxShadow: viewMode === v ? "0 1px 4px rgba(0,0,0,0.1)" : "none",
-                  }}>{icon}</button>
-                ))}
-              </div>
-            </div>
-
-            {/* Category Tabs */}
-            <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
-              {CATEGORIES.map(c => {
-                const count = c === "All" ? items.length : (stats.byCat[c] ? stats.byCat[c].count : 0);
-                const active = selectedCat === c;
-                return (
-                  <button key={c} onClick={() => setSelectedCat(c)} style={{
-                    padding: "7px 16px", borderRadius: 20, fontSize: 13, fontWeight: 600,
-                    border: active ? "2px solid #111" : "1.5px solid #E5E7EB",
-                    background: active ? "#111" : "#fff",
-                    color: active ? "#fff" : "#6B7280",
-                    cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
-                  }}>
-                    <span>{CATEGORY_ICONS[c]}</span>
-                    {c}
-                    <span style={{
-                      background: active ? "rgba(255,255,255,0.2)" : "#F3F4F6",
-                      color: active ? "#fff" : "#9CA3AF",
-                      borderRadius: 10, padding: "1px 7px", fontSize: 11, fontWeight: 700,
-                    }}>{count}</span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Results count */}
-            <div style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 16, fontWeight: 500 }}>
-              Showing {filtered.length} of {items.length} items
-              {filtered.length > 0 && (
-                <span style={{ marginLeft: 12, color: "#374151", fontWeight: 700 }}>
-                  Total: {formatCurrency(filtered.reduce((s, i) => s + i.value, 0))}
-                </span>
-              )}
-            </div>
-
-            {/* Grid / List */}
-            {filtered.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "60px 20px", color: "#9CA3AF", background: "#fff", borderRadius: 16, border: "1px solid #F0F0F0" }}>
-                <div style={{ fontSize: 48, marginBottom: 12 }}>🔍</div>
-                <div style={{ fontSize: 16, fontWeight: 600, color: "#374151", marginBottom: 4 }}>No items found</div>
-                <div style={{ fontSize: 13 }}>Try a different search or category</div>
-              </div>
-            ) : viewMode === "grid" ? (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 16 }}>
-                {filtered.map(item => (
-                  <ItemCard key={item.id} item={item} onEdit={i => setModal(i)} onDelete={handleDelete} />
-                ))}
+            {loading ? (
+              <div style={{textAlign:"center",padding:"80px 20px",color:"#9CA3AF"}}>
+                <div style={{fontSize:40,marginBottom:12}} className="spinner">⏳</div>
+                <div style={{fontSize:15,fontWeight:600}}>Loading collection…</div>
               </div>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <div style={{
-                  display: "grid", gridTemplateColumns: "48px 2fr 120px 100px 100px 120px 80px",
-                  gap: 12, padding: "10px 16px", background: "#F8F8F8",
-                  borderRadius: 10, fontSize: 11, fontWeight: 700, color: "#9CA3AF", letterSpacing: 0.5, textTransform: "uppercase",
-                }}>
-                  {[["", null], ["Name", "name"], ["Category", "category"], ["Condition", "condition"], ["Year", "year"], ["Value", "value"], ["Actions", null]].map(([label, field]) => (
-                    <div key={label} onClick={() => field && toggleSort(field)} style={{ cursor: field ? "pointer" : "default", userSelect: "none" }}>
-                      {label} {field && sortBy === field && (sortDir === "asc" ? "↑" : "↓")}
+              <>
+                {/* Stats */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:16,marginBottom:28}}>
+                  {[
+                    {label:"Total Items",value:stats.total,sub:"in collection",icon:"📦",color:"#111"},
+                    {label:"Portfolio Value",value:formatCurrency(stats.totalValue),sub:"estimated",icon:"💰",color:"#16A34A"},
+                    {label:"Top Item",value:stats.topItem?stats.topItem.name.slice(0,22)+(stats.topItem.name.length>22?"…":""):"—",sub:stats.topItem?formatCurrency(stats.topItem.value):"",icon:"⭐",color:"#E8522A"},
+                    {label:"Categories",value:CATEGORIES.filter(c=>c!=="All"&&stats.byCat[c]&&stats.byCat[c].count>0).length,sub:"active",icon:"🗂️",color:"#2563EB"},
+                  ].map(s=>(
+                    <div key={s.label} style={{background:"#fff",borderRadius:16,padding:"20px 22px",border:"1px solid #F0F0F0",boxShadow:"0 1px 8px rgba(0,0,0,0.04)"}}>
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+                        <span style={{fontSize:11,fontWeight:600,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:0.8}}>{s.label}</span>
+                        <span style={{fontSize:20}}>{s.icon}</span>
+                      </div>
+                      <div style={{fontSize:26,fontWeight:800,color:s.color,letterSpacing:-1,lineHeight:1}}>{s.value}</div>
+                      {s.sub&&<div style={{fontSize:12,color:"#9CA3AF",marginTop:4,fontWeight:500}}>{s.sub}</div>}
                     </div>
                   ))}
                 </div>
-                {filtered.map(item => (
-                  <div key={item.id} style={{
-                    display: "grid", gridTemplateColumns: "48px 2fr 120px 100px 100px 120px 80px",
-                    gap: 12, padding: "12px 16px", background: "#fff",
-                    borderRadius: 12, border: "1px solid #F0F0F0",
-                    alignItems: "center", fontSize: 13, transition: "box-shadow 0.2s",
-                  }}
-                    onMouseEnter={e => e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.08)"}
-                    onMouseLeave={e => e.currentTarget.style.boxShadow = "none"}
-                  >
-                    <div style={{
-                      width: 44, height: 44, borderRadius: 8, overflow: "hidden",
-                      background: `linear-gradient(135deg, ${(CATEGORY_COLORS[item.category] || "#999") + "25"}, ${(CATEGORY_COLORS[item.category] || "#999") + "45"})`,
-                      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                    }}>
-                      {item.image
-                        ? <img src={item.image} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                        : <span style={{ fontSize: 20 }}>{CATEGORY_ICONS[item.category] || "📦"}</span>
-                      }
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 700, color: "#111", marginBottom: 2 }}>{item.name}</div>
-                      {item.notes && <div style={{ fontSize: 11, color: "#9CA3AF", fontStyle: "italic" }}>{item.notes}</div>}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span>{CATEGORY_ICONS[item.category]}</span>
-                      <span style={{ fontSize: 12, color: "#374151", fontWeight: 500 }}>{item.category}</span>
-                    </div>
-                    <ConditionBadge condition={item.condition} />
-                    <div style={{ color: "#6B7280", fontWeight: 500 }}>{item.year}</div>
-                    <div style={{ fontWeight: 800, color: "#111", fontSize: 15 }}>{formatCurrency(item.value)}</div>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button onClick={() => setModal(item)} style={{
-                        background: "#F8F8F8", border: "none", borderRadius: 6, padding: "5px 10px",
-                        fontSize: 11, color: "#374151", cursor: "pointer", fontWeight: 500,
-                      }}>Edit</button>
-                      <button onClick={() => handleDelete(item.id)} style={{
-                        background: "#FEF2F2", border: "none", borderRadius: 6, padding: "5px 8px",
-                        fontSize: 11, color: "#DC2626", cursor: "pointer",
-                      }}>✕</button>
-                    </div>
+
+                {/* Category Breakdown */}
+                <div style={{background:"#fff",borderRadius:16,padding:"20px 22px",border:"1px solid #F0F0F0",marginBottom:28,boxShadow:"0 1px 8px rgba(0,0,0,0.04)"}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"#111",marginBottom:14}}>Collection Breakdown</div>
+                  <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+                    {CATEGORIES.filter(c=>c!=="All").map(c=>{
+                      const d = stats.byCat[c];
+                      if (!d||d.count===0) return null;
+                      const pct = stats.total>0?Math.round((d.count/stats.total)*100):0;
+                      return (
+                        <div key={c} style={{flex:"1 1 140px",minWidth:120}}>
+                          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                            <div style={{fontSize:12,fontWeight:600,color:"#374151",display:"flex",alignItems:"center",gap:5}}>
+                              <span>{CATEGORY_ICONS[c]}</span>{c}
+                            </div>
+                            <span style={{fontSize:11,color:"#9CA3AF"}}>{d.count} items</span>
+                          </div>
+                          <div style={{height:5,background:"#F3F4F6",borderRadius:10,overflow:"hidden"}}>
+                            <div style={{height:"100%",width:`${pct}%`,background:CATEGORY_COLORS[c]||"#111",borderRadius:10}}/>
+                          </div>
+                          <div style={{display:"flex",justifyContent:"space-between",marginTop:5}}>
+                            <span style={{fontSize:11,color:"#9CA3AF"}}>{pct}%</span>
+                            <span style={{fontSize:11,fontWeight:700,color:CATEGORY_COLORS[c]}}>{formatCurrency(d.value)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                ))}
-              </div>
+                </div>
+
+                {/* Filters */}
+                <div style={{display:"flex",gap:12,marginBottom:16,alignItems:"center",flexWrap:"wrap"}}>
+                  <div style={{position:"relative",flex:"1 1 240px",minWidth:200}}>
+                    <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:14,color:"#9CA3AF"}}>🔍</span>
+                    <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name, notes, year…"
+                      style={{width:"100%",padding:"10px 14px 10px 36px",borderRadius:10,border:"1.5px solid #E5E7EB",fontSize:13,background:"#fff",outline:"none",boxSizing:"border-box"}}/>
+                  </div>
+                  <select value={`${sortBy}-${sortDir}`} onChange={e=>{const p=e.target.value.split("-");const dir=p.pop();setSortBy(p.join("-"));setSortDir(dir);}}
+                    style={{padding:"10px 14px",borderRadius:10,border:"1.5px solid #E5E7EB",fontSize:13,background:"#fff",cursor:"pointer",outline:"none"}}>
+                    <option value="value-desc">Value: High → Low</option>
+                    <option value="value-asc">Value: Low → High</option>
+                    <option value="name-asc">Name: A → Z</option>
+                    <option value="dateAdded-desc">Newest First</option>
+                    <option value="year-desc">Year: Newest</option>
+                    <option value="year-asc">Year: Oldest</option>
+                  </select>
+                  <div style={{display:"flex",background:"#F3F4F6",borderRadius:10,padding:3,gap:2}}>
+                    {[["grid","⊞"],["list","☰"]].map(([v,icon])=>(
+                      <button key={v} onClick={()=>setViewMode(v)} style={{background:viewMode===v?"#fff":"transparent",border:"none",borderRadius:8,padding:"6px 12px",fontSize:14,cursor:"pointer",color:viewMode===v?"#111":"#9CA3AF",boxShadow:viewMode===v?"0 1px 4px rgba(0,0,0,0.1)":"none"}}>{icon}</button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Category Tabs */}
+                <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap"}}>
+                  {CATEGORIES.map(c=>{
+                    const count = c==="All"?items.length:(stats.byCat[c]?stats.byCat[c].count:0);
+                    const active = selectedCat===c;
+                    return (
+                      <button key={c} onClick={()=>setSelectedCat(c)} style={{padding:"7px 16px",borderRadius:20,fontSize:13,fontWeight:600,border:active?"2px solid #111":"1.5px solid #E5E7EB",background:active?"#111":"#fff",color:active?"#fff":"#6B7280",cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
+                        <span>{CATEGORY_ICONS[c]}</span>{c}
+                        <span style={{background:active?"rgba(255,255,255,0.2)":"#F3F4F6",color:active?"#fff":"#9CA3AF",borderRadius:10,padding:"1px 7px",fontSize:11,fontWeight:700}}>{count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div style={{fontSize:13,color:"#9CA3AF",marginBottom:16,fontWeight:500}}>
+                  Showing {filtered.length} of {items.length} items
+                  {filtered.length>0&&<span style={{marginLeft:12,color:"#374151",fontWeight:700}}>Total: {formatCurrency(filtered.reduce((s,i)=>s+i.value,0))}</span>}
+                </div>
+
+                {/* Grid / List */}
+                {filtered.length===0 ? (
+                  <div style={{textAlign:"center",padding:"60px 20px",color:"#9CA3AF",background:"#fff",borderRadius:16,border:"1px solid #F0F0F0"}}>
+                    <div style={{fontSize:48,marginBottom:12}}>🔍</div>
+                    <div style={{fontSize:16,fontWeight:600,color:"#374151",marginBottom:4}}>No items found</div>
+                    <div style={{fontSize:13}}>Try a different search or category</div>
+                  </div>
+                ) : viewMode==="grid" ? (
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:16}}>
+                    {filtered.map(item=>(
+                      <ItemCard key={item.id} item={item} isAdmin={isAdmin} onEdit={i=>setModal(i)} onDelete={handleDelete}/>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                    <div style={{display:"grid",gridTemplateColumns:"48px 2fr 120px 100px 100px 120px"+(isAdmin?" 80px":""),gap:12,padding:"10px 16px",background:"#F8F8F8",borderRadius:10,fontSize:11,fontWeight:700,color:"#9CA3AF",letterSpacing:0.5,textTransform:"uppercase"}}>
+                      {[["",""],["Name","name"],["Category","category"],["Condition","condition"],["Year","year"],["Value","value"],...(isAdmin?[["Actions",""]]:[])].map(([label,field])=>(
+                        <div key={label} onClick={()=>field&&setSortBy(field)} style={{cursor:field?"pointer":"default",userSelect:"none"}}>
+                          {label} {field&&sortBy===field&&(sortDir==="asc"?"↑":"↓")}
+                        </div>
+                      ))}
+                    </div>
+                    {filtered.map(item=>(
+                      <div key={item.id} style={{display:"grid",gridTemplateColumns:"48px 2fr 120px 100px 100px 120px"+(isAdmin?" 80px":""),gap:12,padding:"12px 16px",background:"#fff",borderRadius:12,border:"1px solid #F0F0F0",alignItems:"center",fontSize:13,transition:"box-shadow 0.2s"}}
+                        onMouseEnter={e=>e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,0.08)"}
+                        onMouseLeave={e=>e.currentTarget.style.boxShadow="none"}>
+                        <div style={{width:44,height:44,borderRadius:8,overflow:"hidden",background:`linear-gradient(135deg,${(CATEGORY_COLORS[item.category]||"#999")+"25"},${(CATEGORY_COLORS[item.category]||"#999")+"45"})`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                          {item.image?<img src={item.image} alt={item.name} style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span style={{fontSize:20}}>{CATEGORY_ICONS[item.category]||"📦"}</span>}
+                        </div>
+                        <div>
+                          <div style={{fontWeight:700,color:"#111",marginBottom:2}}>{item.name}</div>
+                          {item.notes&&<div style={{fontSize:11,color:"#9CA3AF",fontStyle:"italic"}}>{item.notes}</div>}
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}><span>{CATEGORY_ICONS[item.category]}</span><span style={{fontSize:12,color:"#374151",fontWeight:500}}>{item.category}</span></div>
+                        <ConditionBadge condition={item.condition}/>
+                        <div style={{color:"#6B7280",fontWeight:500}}>{item.year}</div>
+                        <div style={{fontWeight:800,color:"#111",fontSize:15}}>{formatCurrency(item.value)}</div>
+                        {isAdmin&&(
+                          <div style={{display:"flex",gap:6}}>
+                            <button onClick={()=>setModal(item)} style={{background:"#F8F8F8",border:"none",borderRadius:6,padding:"5px 10px",fontSize:11,color:"#374151",cursor:"pointer",fontWeight:500}}>Edit</button>
+                            <button onClick={()=>handleDelete(item.id)} style={{background:"#FEF2F2",border:"none",borderRadius:6,padding:"5px 8px",fontSize:11,color:"#DC2626",cursor:"pointer"}}>✕</button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
 
-          {modal && (
-            <Modal
-              item={modal === "add" ? null : modal}
-              onSave={handleSave}
-              onClose={() => setModal(null)}
-            />
-          )}
+          {modal&&<Modal item={modal==="add"?null:modal} onSave={handleSave} onClose={()=>setModal(null)}/>}
         </div>
       );
     }
 
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
   </script>
 </body>
 </html>

@@ -5,10 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Vasco's Collection Vault</title>
 
-  <!-- ============================================================
-    STEP 1: Fill in your Firebase config below.
-    Get it from: Firebase Console → Project Settings → Your Apps
-  ============================================================ -->
   <script>
     const FIREBASE_CONFIG = {
       apiKey:            "AIzaSyD0X55TqxMi6d75PxeCjjluL2Gn_tsME_w",
@@ -18,15 +14,12 @@
       messagingSenderId: "379661358660",
       appId:             "1:379661358660:web:58b2f4b0a313cf3c458e11"
     };
-    const OWNER_EMAIL = "vascosiomobile@gmail.com";
+    // 改呢度設定你嘅 Admin 密碼
+    const ADMIN_PASSWORD = "vasco2025";
   </script>
 
-  <!-- Firebase SDKs -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-
-  <!-- React + Babel -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -45,14 +38,10 @@
   <script type="text/babel">
     const { useState, useMemo, useRef, useCallback, useEffect } = React;
 
-    // ── Firebase init ──────────────────────────────────────────
-    const app  = firebase.initializeApp(FIREBASE_CONFIG);
-    const db   = firebase.firestore();
-    const auth = firebase.auth();
-    const provider = new firebase.auth.GoogleAuthProvider();
+    const app = firebase.initializeApp(FIREBASE_CONFIG);
+    const db  = firebase.firestore();
     const ITEMS_COL = "items";
 
-    // ── Image compression ──────────────────────────────────────
     function compressImage(dataUrl, maxWidth = 600, quality = 0.78) {
       return new Promise(resolve => {
         const img = new Image();
@@ -68,10 +57,8 @@
       });
     }
 
-    // ── Constants ──────────────────────────────────────────────
     const CATEGORIES = ["All","NBA Card","Pokemon Card","Jersey","Toy","Other"];
     const CONDITIONS  = ["Mint","Near Mint","Excellent","Good","Fair"];
-
     const CATEGORY_ICONS  = { "NBA Card":"🏀","Pokemon Card":"⚡","Jersey":"👕","Toy":"🎮","Other":"📦","All":"✨" };
     const CATEGORY_COLORS = { "NBA Card":"#E8522A","Pokemon Card":"#F5C518","Jersey":"#2563EB","Toy":"#16A34A","Other":"#9333EA" };
 
@@ -79,7 +66,6 @@
       return new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",maximumFractionDigits:0}).format(val);
     }
 
-    // ── Components ─────────────────────────────────────────────
     function ConditionBadge({ condition }) {
       const colors = {
         Mint:{bg:"#DCFCE7",text:"#166534"}, "Near Mint":{bg:"#DBEAFE",text:"#1E40AF"},
@@ -88,6 +74,48 @@
       };
       const c = colors[condition] || {bg:"#F3F4F6",text:"#374151"};
       return <span style={{background:c.bg,color:c.text,padding:"2px 10px",borderRadius:20,fontSize:11,fontWeight:600}}>{condition}</span>;
+    }
+
+    function PasswordModal({ onSuccess, onClose }) {
+      const [pw, setPw] = useState("");
+      const [error, setError] = useState(false);
+      const inputRef = useRef(null);
+      useEffect(() => { inputRef.current && inputRef.current.focus(); }, []);
+
+      const handleSubmit = () => {
+        if (pw === ADMIN_PASSWORD) { onSuccess(); }
+        else { setError(true); setPw(""); setTimeout(() => setError(false), 1500); }
+      };
+
+      return (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",backdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
+          <div style={{background:"#fff",borderRadius:20,padding:36,width:"100%",maxWidth:360,boxShadow:"0 20px 60px rgba(0,0,0,0.15)",textAlign:"center"}}>
+            <div style={{fontSize:40,marginBottom:12}}>🔐</div>
+            <div style={{fontSize:18,fontWeight:800,color:"#111",marginBottom:6}}>Admin Login</div>
+            <div style={{fontSize:13,color:"#9CA3AF",marginBottom:24}}>Enter your password to edit</div>
+            <input
+              ref={inputRef}
+              type="password"
+              value={pw}
+              onChange={e => setPw(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleSubmit()}
+              placeholder="Password"
+              style={{
+                width:"100%", padding:"12px 16px", borderRadius:12,
+                border: error ? "2px solid #EF4444" : "1.5px solid #E5E7EB",
+                fontSize:15, outline:"none", marginBottom:12, textAlign:"center",
+                background: error ? "#FEF2F2" : "#fff",
+                transition:"all 0.2s",
+              }}
+            />
+            {error && <div style={{fontSize:12,color:"#EF4444",marginBottom:12}}>Wrong password, try again</div>}
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={onClose} style={{flex:1,padding:"11px",background:"#F3F4F6",border:"none",borderRadius:12,fontSize:14,fontWeight:600,cursor:"pointer",color:"#6B7280"}}>Cancel</button>
+              <button onClick={handleSubmit} style={{flex:1,padding:"11px",background:"#111",border:"none",borderRadius:12,fontSize:14,fontWeight:700,cursor:"pointer",color:"#fff"}}>Login</button>
+            </div>
+          </div>
+        </div>
+      );
     }
 
     function ItemCard({ item, isAdmin, onEdit, onDelete }) {
@@ -162,7 +190,7 @@
               onDrop={e=>{e.preventDefault();setDragging(false);processFile(e.dataTransfer.files[0]);}}
               style={{border:`2px dashed ${dragging?"#111":"#D1D5DB"}`,borderRadius:12,height:140,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",background:dragging?"#F9F9F9":"#FAFAFA",gap:8}}>
               {compressing
-                ? <><span className="spinner" style={{fontSize:24}}>⏳</span><div style={{fontSize:13,color:"#9CA3AF"}}>Compressing…</div></>
+                ? <><span style={{fontSize:24}}>⏳</span><div style={{fontSize:13,color:"#9CA3AF"}}>Compressing…</div></>
                 : <><span style={{fontSize:32}}>🖼️</span><div style={{fontSize:13,fontWeight:600,color:"#374151"}}>Click to upload or drag & drop</div><div style={{fontSize:11,color:"#9CA3AF"}}>JPG, PNG, WEBP</div></>
               }
             </div>
@@ -191,9 +219,7 @@
               <h2 style={{margin:0,fontSize:20,fontWeight:800,color:"#111"}}>{item&&item.id?"Edit Item":"Add New Item"}</h2>
               <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:8,width:32,height:32,cursor:"pointer",fontSize:16,color:"#6B7280"}}>✕</button>
             </div>
-
             <ImageUploader value={form.image} onChange={v=>handleChange("image",v)}/>
-
             {[{label:"Item Name",key:"name",type:"text",placeholder:"e.g. Kobe Bryant RC"},
               {label:"Year",key:"year",type:"number",placeholder:"e.g. 1996"},
               {label:"Value (USD)",key:"value",type:"number",placeholder:"e.g. 500"},
@@ -207,7 +233,6 @@
                   onFocus={e=>e.target.style.borderColor="#111"} onBlur={e=>e.target.style.borderColor="#E5E7EB"}/>
               </div>
             ))}
-
             <div style={{marginBottom:16}}>
               <label style={{display:"block",fontSize:13,fontWeight:600,color:"#374151",marginBottom:6}}>Category</label>
               <select value={form.category} onChange={e=>handleChange("category",e.target.value)}
@@ -215,7 +240,6 @@
                 {CATEGORIES.filter(c=>c!=="All").map(c=><option key={c}>{c}</option>)}
               </select>
             </div>
-
             <div style={{marginBottom:24}}>
               <label style={{display:"block",fontSize:13,fontWeight:600,color:"#374151",marginBottom:6}}>Condition</label>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -224,7 +248,6 @@
                 ))}
               </div>
             </div>
-
             <button onClick={handleSave} disabled={saving} style={{width:"100%",padding:"13px",background:saving?"#666":"#111",color:"#fff",border:"none",borderRadius:12,fontSize:15,fontWeight:700,cursor:saving?"not-allowed":"pointer"}}>
               {saving ? "Saving…" : (item&&item.id?"Save Changes":"Add to Collection")}
             </button>
@@ -233,90 +256,70 @@
       );
     }
 
-    // ── Main App ───────────────────────────────────────────────
     function App() {
-      const [items,     setItems]     = useState([]);
-      const [loading,   setLoading]   = useState(true);
-      const [user,      setUser]      = useState(null);
-      const [authLoading, setAuthLoading] = useState(true);
-      const [selectedCat, setSelectedCat] = useState("All");
-      const [search,    setSearch]    = useState("");
-      const [sortBy,    setSortBy]    = useState("dateAdded");
-      const [sortDir,   setSortDir]   = useState("desc");
-      const [modal,     setModal]     = useState(null);
-      const [viewMode,  setViewMode]  = useState("grid");
+      const [items,      setItems]      = useState([]);
+      const [loading,    setLoading]    = useState(true);
+      const [isAdmin,    setIsAdmin]    = useState(false);
+      const [showPwModal,setShowPwModal]= useState(false);
+      const [selectedCat,setSelectedCat]= useState("All");
+      const [search,     setSearch]     = useState("");
+      const [sortBy,     setSortBy]     = useState("dateAdded");
+      const [sortDir,    setSortDir]    = useState("desc");
+      const [modal,      setModal]      = useState(null);
+      const [viewMode,   setViewMode]   = useState("grid");
 
-      const isAdmin = user && user.email === OWNER_EMAIL;
-
-      // Auth listener
-      useEffect(() => {
-        return auth.onAuthStateChanged(u => { setUser(u); setAuthLoading(false); });
-      }, []);
-
-      // Firestore real-time listener
       useEffect(() => {
         const unsub = db.collection(ITEMS_COL)
           .orderBy("dateAdded","desc")
           .onSnapshot(snap => {
-            setItems(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+            setItems(snap.docs.map(d=>({id:d.id,...d.data()})));
             setLoading(false);
-          }, err => {
-            console.error(err);
-            setLoading(false);
-          });
+          }, err => { console.error(err); setLoading(false); });
         return unsub;
       }, []);
 
-      const handleSignIn  = () => auth.signInWithRedirect(provider);
-      const handleSignOut = () => auth.signOut();
-
-      // Handle redirect result on page load
-      useEffect(() => {
-        auth.getRedirectResult().catch(err => console.error("Redirect error:", err));
-      }, []);
-
       const handleSave = async (form) => {
-        const data = { ...form };
+        const data = {...form};
         delete data.id;
         if (form.id) {
           await db.collection(ITEMS_COL).doc(form.id).set(data);
         } else {
-          await db.collection(ITEMS_COL).add({ ...data, dateAdded: new Date().toISOString().slice(0,10) });
+          await db.collection(ITEMS_COL).add({...data, dateAdded: new Date().toISOString().slice(0,10)});
         }
         setModal(null);
       };
 
       const handleDelete = async (id) => {
-        if (window.confirm("Remove this item from your collection?")) {
+        if (window.confirm("Remove this item?")) {
           await db.collection(ITEMS_COL).doc(id).delete();
         }
       };
 
       const filtered = useMemo(() => {
         let arr = items;
-        if (selectedCat !== "All") arr = arr.filter(i => i.category === selectedCat);
+        if (selectedCat !== "All") arr = arr.filter(i=>i.category===selectedCat);
         if (search.trim()) {
           const s = search.toLowerCase();
-          arr = arr.filter(i => i.name.toLowerCase().includes(s) || (i.notes&&i.notes.toLowerCase().includes(s)) || String(i.year).includes(s));
+          arr = arr.filter(i=>i.name.toLowerCase().includes(s)||(i.notes&&i.notes.toLowerCase().includes(s))||String(i.year).includes(s));
         }
-        return [...arr].sort((a,b) => {
-          let va = a[sortBy], vb = b[sortBy];
-          if (typeof va==="string") { va=va.toLowerCase(); vb=vb.toLowerCase(); }
+        return [...arr].sort((a,b)=>{
+          let va=a[sortBy],vb=b[sortBy];
+          if (typeof va==="string"){va=va.toLowerCase();vb=vb.toLowerCase();}
           if (va<vb) return sortDir==="asc"?-1:1;
           if (va>vb) return sortDir==="asc"?1:-1;
           return 0;
         });
-      }, [items, selectedCat, search, sortBy, sortDir]);
+      }, [items,selectedCat,search,sortBy,sortDir]);
 
       const stats = useMemo(() => {
         const totalValue = items.reduce((s,i)=>s+i.value,0);
         const byCat = {};
         CATEGORIES.filter(c=>c!=="All").forEach(c=>{
-          const ci = items.filter(i=>i.category===c);
-          byCat[c] = { count:ci.length, value:ci.reduce((s,i)=>s+i.value,0) };
+          const ci=items.filter(i=>i.category===c);
+          byCat[c]={count:ci.length,value:ci.reduce((s,i)=>s+i.value,0)};
         });
-        const topItem = items.length ? items.reduce((a,b)=>a.value>b.value?a:b) : null;
-        return { totalValue, byCat, topItem, total:items.length };
+        const topItem = items.length?items.reduce((a,b)=>a.value>b.value?a:b):null;
+        return {totalValue,byCat,topItem,total:items.length};
       }, [items]);
 
       return (
@@ -333,23 +336,20 @@
                     <div style={{fontSize:11,color:"#9CA3AF",fontWeight:500,marginTop:-2}}>Vasco's Collection Vault</div>
                   </div>
                 </div>
-
                 <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  {!authLoading && (
-                    isAdmin ? (
-                      <>
-                        <button onClick={()=>setModal("add")} style={{background:"#111",color:"#fff",border:"none",borderRadius:10,padding:"9px 18px",fontSize:13,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
-                          <span style={{fontSize:16}}>+</span> Add Item
-                        </button>
-                        <button onClick={handleSignOut} style={{background:"#F3F4F6",color:"#374151",border:"none",borderRadius:10,padding:"9px 14px",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
-                          <img src={user.photoURL} style={{width:20,height:20,borderRadius:"50%"}} alt=""/> Sign Out
-                        </button>
-                      </>
-                    ) : (
-                      <button onClick={handleSignIn} style={{background:"#F3F4F6",color:"#374151",border:"1.5px solid #E5E7EB",borderRadius:10,padding:"8px 16px",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:8}}>
-                        <span>🔐</span> Admin Login
+                  {isAdmin ? (
+                    <>
+                      <button onClick={()=>setModal("add")} style={{background:"#111",color:"#fff",border:"none",borderRadius:10,padding:"9px 18px",fontSize:13,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
+                        <span style={{fontSize:16}}>+</span> Add Item
                       </button>
-                    )
+                      <button onClick={()=>setIsAdmin(false)} style={{background:"#F3F4F6",color:"#374151",border:"none",borderRadius:10,padding:"9px 14px",fontSize:13,fontWeight:600,cursor:"pointer"}}>
+                        🔓 Logout
+                      </button>
+                    </>
+                  ) : (
+                    <button onClick={()=>setShowPwModal(true)} style={{background:"#F3F4F6",color:"#374151",border:"1.5px solid #E5E7EB",borderRadius:10,padding:"8px 16px",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:8}}>
+                      🔐 Admin Login
+                    </button>
                   )}
                 </div>
               </div>
@@ -357,7 +357,6 @@
           </div>
 
           <div style={{maxWidth:1200,margin:"0 auto",padding:"28px 24px"}}>
-
             {loading ? (
               <div style={{textAlign:"center",padding:"80px 20px",color:"#9CA3AF"}}>
                 <div style={{fontSize:40,marginBottom:12}} className="spinner">⏳</div>
@@ -384,20 +383,18 @@
                   ))}
                 </div>
 
-                {/* Category Breakdown */}
+                {/* Breakdown */}
                 <div style={{background:"#fff",borderRadius:16,padding:"20px 22px",border:"1px solid #F0F0F0",marginBottom:28,boxShadow:"0 1px 8px rgba(0,0,0,0.04)"}}>
                   <div style={{fontSize:13,fontWeight:700,color:"#111",marginBottom:14}}>Collection Breakdown</div>
                   <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
                     {CATEGORIES.filter(c=>c!=="All").map(c=>{
-                      const d = stats.byCat[c];
+                      const d=stats.byCat[c];
                       if (!d||d.count===0) return null;
-                      const pct = stats.total>0?Math.round((d.count/stats.total)*100):0;
+                      const pct=stats.total>0?Math.round((d.count/stats.total)*100):0;
                       return (
                         <div key={c} style={{flex:"1 1 140px",minWidth:120}}>
                           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-                            <div style={{fontSize:12,fontWeight:600,color:"#374151",display:"flex",alignItems:"center",gap:5}}>
-                              <span>{CATEGORY_ICONS[c]}</span>{c}
-                            </div>
+                            <div style={{fontSize:12,fontWeight:600,color:"#374151",display:"flex",alignItems:"center",gap:5}}><span>{CATEGORY_ICONS[c]}</span>{c}</div>
                             <span style={{fontSize:11,color:"#9CA3AF"}}>{d.count} items</span>
                           </div>
                           <div style={{height:5,background:"#F3F4F6",borderRadius:10,overflow:"hidden"}}>
@@ -439,8 +436,8 @@
                 {/* Category Tabs */}
                 <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap"}}>
                   {CATEGORIES.map(c=>{
-                    const count = c==="All"?items.length:(stats.byCat[c]?stats.byCat[c].count:0);
-                    const active = selectedCat===c;
+                    const count=c==="All"?items.length:(stats.byCat[c]?stats.byCat[c].count:0);
+                    const active=selectedCat===c;
                     return (
                       <button key={c} onClick={()=>setSelectedCat(c)} style={{padding:"7px 16px",borderRadius:20,fontSize:13,fontWeight:600,border:active?"2px solid #111":"1.5px solid #E5E7EB",background:active?"#111":"#fff",color:active?"#fff":"#6B7280",cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
                         <span>{CATEGORY_ICONS[c]}</span>{c}
@@ -455,12 +452,11 @@
                   {filtered.length>0&&<span style={{marginLeft:12,color:"#374151",fontWeight:700}}>Total: {formatCurrency(filtered.reduce((s,i)=>s+i.value,0))}</span>}
                 </div>
 
-                {/* Grid / List */}
                 {filtered.length===0 ? (
                   <div style={{textAlign:"center",padding:"60px 20px",color:"#9CA3AF",background:"#fff",borderRadius:16,border:"1px solid #F0F0F0"}}>
                     <div style={{fontSize:48,marginBottom:12}}>🔍</div>
                     <div style={{fontSize:16,fontWeight:600,color:"#374151",marginBottom:4}}>No items found</div>
-                    <div style={{fontSize:13}}>Try a different search or category</div>
+                    <div style={{fontSize:13}}>{items.length===0?"Click Admin Login to start adding items!":"Try a different search or category"}</div>
                   </div>
                 ) : viewMode==="grid" ? (
                   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:16}}>
@@ -471,9 +467,9 @@
                 ) : (
                   <div style={{display:"flex",flexDirection:"column",gap:10}}>
                     <div style={{display:"grid",gridTemplateColumns:"48px 2fr 120px 100px 100px 120px"+(isAdmin?" 80px":""),gap:12,padding:"10px 16px",background:"#F8F8F8",borderRadius:10,fontSize:11,fontWeight:700,color:"#9CA3AF",letterSpacing:0.5,textTransform:"uppercase"}}>
-                      {[["",""],["Name","name"],["Category","category"],["Condition","condition"],["Year","year"],["Value","value"],...(isAdmin?[["Actions",""]]:[])].map(([label,field])=>(
+                      {[["",""],["Name","name"],["Category","category"],["Condition","condition"],["Year","year"],["Value","value"],...(isAdmin?[["Actions",""]]:[])] .map(([label,field])=>(
                         <div key={label} onClick={()=>field&&setSortBy(field)} style={{cursor:field?"pointer":"default",userSelect:"none"}}>
-                          {label} {field&&sortBy===field&&(sortDir==="asc"?"↑":"↓")}
+                          {label}{field&&sortBy===field&&(sortDir==="asc"?"↑":"↓")}
                         </div>
                       ))}
                     </div>
@@ -506,7 +502,8 @@
             )}
           </div>
 
-          {modal&&<Modal item={modal==="add"?null:modal} onSave={handleSave} onClose={()=>setModal(null)}/>}
+          {showPwModal && <PasswordModal onSuccess={()=>{setIsAdmin(true);setShowPwModal(false);}} onClose={()=>setShowPwModal(false)}/>}
+          {modal && <Modal item={modal==="add"?null:modal} onSave={handleSave} onClose={()=>setModal(null)}/>}
         </div>
       );
     }

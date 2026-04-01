@@ -16,6 +16,8 @@
     };
     // 改呢度設定你嘅 Admin 密碼
     const ADMIN_PASSWORD = "vasco2025";
+    // eBay App ID
+    const EBAY_APP_ID = "KeiChonS-mycollec-PRD-b40ce5f68-2dc8555f";
   </script>
 
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -23,6 +25,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -41,6 +44,244 @@
     const app = firebase.initializeApp(FIREBASE_CONFIG);
     const db  = firebase.firestore();
     const ITEMS_COL = "items";
+
+    // ── eBay JSONP Search ──────────────────────────────────────
+    function searchEbaySold(keywords) {
+      return new Promise((resolve, reject) => {
+        const cbName = "ebay_cb_" + Date.now();
+        const script = document.createElement("script");
+        const q = encodeURIComponent(keywords);
+        script.src = [
+          "https://svcs.ebay.com/services/search/FindingService/v1",
+          "?OPERATION-NAME=findCompletedItems",
+          "&SERVICE-VERSION=1.0.0",
+          `&SECURITY-APPNAME=${EBAY_APP_ID}`,
+          "&RESPONSE-DATA-FORMAT=JSON",
+          `&callback=${cbName}`,
+          "&REST-PAYLOAD",
+          `&keywords=${q}`,
+          "&itemFilter(0).name=SoldItemsOnly",
+          "&itemFilter(0).value=true",
+          "&paginationInput.entriesPerPage=20",
+          "&sortOrder=EndTimeSoonest",
+        ].join("");
+
+        const cleanup = () => {
+          delete window[cbName];
+          if (script.parentNode) document.body.removeChild(script);
+        };
+
+        window[cbName] = (data) => {
+          cleanup();
+          try {
+            const res = data.findCompletedItemsResponse[0];
+            const items = res.searchResult[0].item || [];
+            const parsed = items
+              .filter(i => i.sellingStatus && i.sellingStatus[0].currentPrice)
+              .map(i => ({
+                title:  i.title[0],
+                price:  parseFloat(i.sellingStatus[0].currentPrice[0].__value__),
+                date:   i.listingInfo[0].endTime[0].slice(0, 10),
+                url:    i.viewItemURL[0],
+              }))
+              .filter(i => !isNaN(i.price) && i.price > 0);
+            resolve(parsed);
+          } catch(e) { resolve([]); }
+        };
+
+        script.onerror = () => { cleanup(); reject(new Error("eBay API error")); };
+        setTimeout(() => { cleanup(); reject(new Error("Timeout")); }, 10000);
+        document.body.appendChild(script);
+      });
+    }
+
+    // ── Price Tracker Modal ────────────────────────────────────
+    function PriceTrackerModal({ item, onClose }) {
+      const [status,  setStatus]  = useState("loading"); // loading | done | error
+      const [sales,   setSales]   = useState([]);
+      const [keyword, setKeyword] = useState(item.name);
+      const chartRef = useRef(null);
+      const chartInstance = useRef(null);
+
+      const fetchPrices = useCallback(async (kw) => {
+        setStatus("loading"); setSales([]);
+        try {
+          const data = await searchEbaySold(kw);
+          setSales(data);
+          setStatus(data.length > 0 ? "done" : "empty");
+        } catch(e) {
+          setStatus("error");
+        }
+      }, []);
+
+      useEffect(() => { fetchPrices(item.name); }, []);
+
+      useEffect(() => {
+        if (status !== "done" || sales.length === 0 || !chartRef.current) return;
+        if (chartInstance.current) chartInstance.current.destroy();
+
+        const sorted = [...sales].sort((a,b) => a.date.localeCompare(b.date));
+        const labels = sorted.map(s => s.date);
+        const data   = sorted.map(s => s.price);
+        const avg    = data.reduce((a,b)=>a+b,0)/data.length;
+
+        chartInstance.current = new Chart(chartRef.current, {
+          type: "line",
+          data: {
+            labels,
+            datasets: [
+              {
+                label: "Sold Price (USD)",
+                data,
+                borderColor: "#111",
+                backgroundColor: "rgba(17,17,17,0.06)",
+                borderWidth: 2,
+                pointBackgroundColor: "#111",
+                pointRadius: 4,
+                tension: 0.3,
+                fill: true,
+              },
+              {
+                label: "Avg",
+                data: labels.map(()=>avg),
+                borderColor: "#E8522A",
+                borderWidth: 1.5,
+                borderDash: [6,3],
+                pointRadius: 0,
+                fill: false,
+              }
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: "top", labels: { font: { size: 11 }, boxWidth: 20 } },
+              tooltip: {
+                callbacks: {
+                  label: ctx => `$${ctx.parsed.y.toFixed(0)}`,
+                }
+              }
+            },
+            scales: {
+              x: { ticks: { font:{size:10}, maxTicksLimit: 8 }, grid:{display:false} },
+              y: { ticks: { callback: v=>`$${v}`, font:{size:10} } },
+            },
+          },
+        });
+        return () => { if (chartInstance.current) chartInstance.current.destroy(); };
+      }, [status, sales]);
+
+      const prices = sales.map(s=>s.price);
+      const avg    = prices.length ? prices.reduce((a,b)=>a+b,0)/prices.length : 0;
+      const high   = prices.length ? Math.max(...prices) : 0;
+      const low    = prices.length ? Math.min(...prices) : 0;
+      const myVal  = item.value || 0;
+      const diff   = avg > 0 ? ((myVal - avg) / avg * 100) : 0;
+
+      return (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",backdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:20}}>
+          <div style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:700,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}}>
+
+            {/* Header */}
+            <div style={{padding:"24px 28px 0",display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12}}>
+              <div>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                  <span style={{fontSize:20}}>📊</span>
+                  <span style={{fontSize:16,fontWeight:800,color:"#111"}}>eBay Market Price</span>
+                </div>
+                <div style={{fontSize:12,color:"#9CA3AF"}}>{item.name}</div>
+              </div>
+              <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:8,width:32,height:32,cursor:"pointer",fontSize:16,color:"#6B7280",flexShrink:0}}>✕</button>
+            </div>
+
+            {/* Search bar */}
+            <div style={{padding:"16px 28px 0",display:"flex",gap:8}}>
+              <input
+                value={keyword}
+                onChange={e=>setKeyword(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&fetchPrices(keyword)}
+                placeholder="Refine search…"
+                style={{flex:1,padding:"9px 14px",borderRadius:10,border:"1.5px solid #E5E7EB",fontSize:13,outline:"none"}}
+                onFocus={e=>e.target.style.borderColor="#111"}
+                onBlur={e=>e.target.style.borderColor="#E5E7EB"}
+              />
+              <button onClick={()=>fetchPrices(keyword)} style={{background:"#111",color:"#fff",border:"none",borderRadius:10,padding:"9px 18px",fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+                Search
+              </button>
+            </div>
+
+            <div style={{padding:"20px 28px 28px"}}>
+              {status === "loading" && (
+                <div style={{textAlign:"center",padding:"40px 0",color:"#9CA3AF"}}>
+                  <div style={{fontSize:32,marginBottom:8}} className="spinner">⏳</div>
+                  <div style={{fontSize:13}}>Searching eBay sold listings…</div>
+                </div>
+              )}
+
+              {status === "error" && (
+                <div style={{textAlign:"center",padding:"40px 0",color:"#EF4444"}}>
+                  <div style={{fontSize:32,marginBottom:8}}>⚠️</div>
+                  <div style={{fontSize:13,fontWeight:600}}>Failed to fetch eBay data</div>
+                  <button onClick={()=>fetchPrices(keyword)} style={{marginTop:12,background:"#111",color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontSize:12,cursor:"pointer"}}>Retry</button>
+                </div>
+              )}
+
+              {status === "empty" && (
+                <div style={{textAlign:"center",padding:"40px 0",color:"#9CA3AF"}}>
+                  <div style={{fontSize:32,marginBottom:8}}>🔍</div>
+                  <div style={{fontSize:13}}>No sold listings found. Try a shorter keyword.</div>
+                </div>
+              )}
+
+              {status === "done" && sales.length > 0 && (
+                <>
+                  {/* Stats row */}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}>
+                    {[
+                      {label:"Avg Price",  value:`$${avg.toFixed(0)}`,  color:"#111"},
+                      {label:"Highest",    value:`$${high.toFixed(0)}`, color:"#16A34A"},
+                      {label:"Lowest",     value:`$${low.toFixed(0)}`,  color:"#E8522A"},
+                      {label:"vs My Value",value:`${diff>=0?"+":""}${diff.toFixed(0)}%`, color:diff>=0?"#16A34A":"#E8522A"},
+                    ].map(s=>(
+                      <div key={s.label} style={{background:"#F8F8F8",borderRadius:12,padding:"12px 14px",textAlign:"center"}}>
+                        <div style={{fontSize:10,fontWeight:600,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:0.6,marginBottom:4}}>{s.label}</div>
+                        <div style={{fontSize:18,fontWeight:800,color:s.color}}>{s.value}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Chart */}
+                  <div style={{height:220,marginBottom:20,background:"#FAFAFA",borderRadius:12,padding:"12px"}}>
+                    <canvas ref={chartRef}/>
+                  </div>
+
+                  {/* Recent sales list */}
+                  <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:10,textTransform:"uppercase",letterSpacing:0.6}}>
+                    Recent Sales ({sales.length})
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                    {sales.slice(0,15).map((s,i)=>(
+                      <a key={i} href={s.url} target="_blank" rel="noopener noreferrer"
+                        style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",borderRadius:10,border:"1px solid #F0F0F0",textDecoration:"none",color:"inherit",transition:"background 0.15s"}}
+                        onMouseEnter={e=>e.currentTarget.style.background="#F8F8F8"}
+                        onMouseLeave={e=>e.currentTarget.style.background="transparent"}
+                      >
+                        <div style={{flex:1,fontSize:12,color:"#374151",marginRight:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.title}</div>
+                        <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+                          <span style={{fontSize:11,color:"#9CA3AF"}}>{s.date}</span>
+                          <span style={{fontSize:14,fontWeight:800,color:"#111",minWidth:60,textAlign:"right"}}>${s.price.toFixed(0)}</span>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
 
     function compressImage(dataUrl, maxWidth = 600, quality = 0.78) {
       return new Promise(resolve => {
@@ -118,7 +359,7 @@
       );
     }
 
-    function ItemCard({ item, isAdmin, onEdit, onDelete }) {
+    function ItemCard({ item, isAdmin, onEdit, onDelete, onPriceCheck }) {
       const catColor = CATEGORY_COLORS[item.category] || "#6B7280";
       return (
         <div style={{background:"#fff",borderRadius:16,border:"1px solid #F0F0F0",overflow:"hidden",boxShadow:"0 2px 12px rgba(0,0,0,0.05)",transition:"all 0.2s ease"}}
@@ -141,12 +382,13 @@
             {item.notes && <div style={{fontSize:12,color:"#6B7280",marginBottom:10,fontStyle:"italic"}}>{item.notes}</div>}
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",borderTop:"1px solid #F5F5F5",paddingTop:12,marginTop:4}}>
               <div style={{fontSize:20,fontWeight:800,color:"#111"}}>{formatCurrency(item.value)}</div>
-              {isAdmin && (
-                <div style={{display:"flex",gap:6}}>
+              <div style={{display:"flex",gap:6}}>
+                <button onClick={e=>{e.stopPropagation();onPriceCheck(item);}} style={{background:"#F0FDF4",border:"none",borderRadius:8,padding:"6px 10px",fontSize:12,color:"#16A34A",cursor:"pointer",fontWeight:600}} title="Check eBay market price">📊</button>
+                {isAdmin && <>
                   <button onClick={e=>{e.stopPropagation();onEdit(item);}} style={{background:"#F8F8F8",border:"none",borderRadius:8,padding:"6px 12px",fontSize:12,color:"#374151",cursor:"pointer",fontWeight:500}}>Edit</button>
                   <button onClick={e=>{e.stopPropagation();onDelete(item.id);}} style={{background:"#FEF2F2",border:"none",borderRadius:8,padding:"6px 12px",fontSize:12,color:"#DC2626",cursor:"pointer",fontWeight:500}}>✕</button>
-                </div>
-              )}
+                </>}
+              </div>
             </div>
           </div>
         </div>
@@ -267,6 +509,7 @@
       const [sortDir,    setSortDir]    = useState("desc");
       const [modal,      setModal]      = useState(null);
       const [viewMode,   setViewMode]   = useState("grid");
+      const [priceItem,  setPriceItem]  = useState(null);
 
       useEffect(() => {
         const unsub = db.collection(ITEMS_COL)
@@ -461,12 +704,12 @@
                 ) : viewMode==="grid" ? (
                   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:16}}>
                     {filtered.map(item=>(
-                      <ItemCard key={item.id} item={item} isAdmin={isAdmin} onEdit={i=>setModal(i)} onDelete={handleDelete}/>
+                      <ItemCard key={item.id} item={item} isAdmin={isAdmin} onEdit={i=>setModal(i)} onDelete={handleDelete} onPriceCheck={i=>setPriceItem(i)}/>
                     ))}
                   </div>
                 ) : (
                   <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                    <div style={{display:"grid",gridTemplateColumns:"48px 2fr 120px 100px 100px 120px"+(isAdmin?" 80px":""),gap:12,padding:"10px 16px",background:"#F8F8F8",borderRadius:10,fontSize:11,fontWeight:700,color:"#9CA3AF",letterSpacing:0.5,textTransform:"uppercase"}}>
+                    <div style={{display:"grid",gridTemplateColumns:"48px 2fr 120px 100px 100px 120px "+(isAdmin?"120px":"50px"),gap:12,padding:"10px 16px",background:"#F8F8F8",borderRadius:10,fontSize:11,fontWeight:700,color:"#9CA3AF",letterSpacing:0.5,textTransform:"uppercase"}}>
                       {[["",""],["Name","name"],["Category","category"],["Condition","condition"],["Year","year"],["Value","value"],...(isAdmin?[["Actions",""]]:[])] .map(([label,field])=>(
                         <div key={label} onClick={()=>field&&setSortBy(field)} style={{cursor:field?"pointer":"default",userSelect:"none"}}>
                           {label}{field&&sortBy===field&&(sortDir==="asc"?"↑":"↓")}
@@ -474,7 +717,7 @@
                       ))}
                     </div>
                     {filtered.map(item=>(
-                      <div key={item.id} style={{display:"grid",gridTemplateColumns:"48px 2fr 120px 100px 100px 120px"+(isAdmin?" 80px":""),gap:12,padding:"12px 16px",background:"#fff",borderRadius:12,border:"1px solid #F0F0F0",alignItems:"center",fontSize:13,transition:"box-shadow 0.2s"}}
+                      <div key={item.id} style={{display:"grid",gridTemplateColumns:"48px 2fr 120px 100px 100px 120px "+(isAdmin?"120px":"50px"),gap:12,padding:"12px 16px",background:"#fff",borderRadius:12,border:"1px solid #F0F0F0",alignItems:"center",fontSize:13,transition:"box-shadow 0.2s"}}
                         onMouseEnter={e=>e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,0.08)"}
                         onMouseLeave={e=>e.currentTarget.style.boxShadow="none"}>
                         <div style={{width:44,height:44,borderRadius:8,overflow:"hidden",background:`linear-gradient(135deg,${(CATEGORY_COLORS[item.category]||"#999")+"25"},${(CATEGORY_COLORS[item.category]||"#999")+"45"})`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
@@ -488,12 +731,13 @@
                         <ConditionBadge condition={item.condition}/>
                         <div style={{color:"#6B7280",fontWeight:500}}>{item.year}</div>
                         <div style={{fontWeight:800,color:"#111",fontSize:15}}>{formatCurrency(item.value)}</div>
-                        {isAdmin&&(
-                          <div style={{display:"flex",gap:6}}>
+                        <div style={{display:"flex",gap:5}}>
+                          <button onClick={()=>setPriceItem(item)} style={{background:"#F0FDF4",border:"none",borderRadius:6,padding:"5px 8px",fontSize:11,color:"#16A34A",cursor:"pointer",fontWeight:600}} title="eBay price check">📊</button>
+                          {isAdmin&&<>
                             <button onClick={()=>setModal(item)} style={{background:"#F8F8F8",border:"none",borderRadius:6,padding:"5px 10px",fontSize:11,color:"#374151",cursor:"pointer",fontWeight:500}}>Edit</button>
                             <button onClick={()=>handleDelete(item.id)} style={{background:"#FEF2F2",border:"none",borderRadius:6,padding:"5px 8px",fontSize:11,color:"#DC2626",cursor:"pointer"}}>✕</button>
-                          </div>
-                        )}
+                          </>}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -504,6 +748,7 @@
 
           {showPwModal && <PasswordModal onSuccess={()=>{setIsAdmin(true);setShowPwModal(false);}} onClose={()=>setShowPwModal(false)}/>}
           {modal && <Modal item={modal==="add"?null:modal} onSave={handleSave} onClose={()=>setModal(null)}/>}
+          {priceItem && <PriceTrackerModal item={priceItem} onClose={()=>setPriceItem(null)}/>}
         </div>
       );
     }

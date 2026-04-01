@@ -267,8 +267,13 @@
         return unsub;
       }, []);
 
-      const handleSignIn  = () => auth.signInWithPopup(provider);
+      const handleSignIn  = () => auth.signInWithRedirect(provider);
       const handleSignOut = () => auth.signOut();
+
+      // Handle redirect result on page load
+      useEffect(() => {
+        auth.getRedirectResult().catch(err => console.error("Redirect error:", err));
+      }, []);
 
       const handleSave = async (form) => {
         const data = { ...form };

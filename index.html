@@ -43,7 +43,9 @@
 
     const app = firebase.initializeApp(FIREBASE_CONFIG);
     const db  = firebase.firestore();
-    const ITEMS_COL = "items";
+    const ITEMS_COL   = "items";
+    const SERIES_COL  = "series";
+    const SUBCATS_COL = "subcategories";
 
     // ── eBay JSONP Search ──────────────────────────────────────
     function searchEbaySold(keywords) {
@@ -283,6 +285,248 @@
       );
     }
 
+    // ── Insights Modal ─────────────────────────────────────────
+    function InsightsModal({ items, seriesList, allCats, isAdmin, onClose, onAddSeries, onDeleteSeries }) {
+      const [tab, setTab] = useState("spending"); // spending | series
+      const pieRef  = useRef(null);
+      const pieInst = useRef(null);
+
+      const COLORS = ["#E8522A","#F5C518","#2563EB","#16A34A","#9333EA","#EC4899"];
+      const CAT_COLORS = { "NBA Card":"#E8522A","Pokemon Card":"#F5C518","Jersey":"#2563EB","Toy":"#16A34A","Other":"#9333EA" };
+
+      // Spending stats
+      const spendingByCat = useMemo(() => {
+        const map = {};
+        items.forEach(i => {
+          if (!map[i.category]) map[i.category] = 0;
+          map[i.category] += i.value || 0;
+        });
+        return Object.entries(map).sort((a,b)=>b[1]-a[1]);
+      }, [items]);
+      const totalSpend = spendingByCat.reduce((s,[,v])=>s+v, 0);
+
+      // Pie chart
+      useEffect(() => {
+        if (tab !== "spending" || !pieRef.current || spendingByCat.length === 0) return;
+        if (pieInst.current) pieInst.current.destroy();
+        pieInst.current = new Chart(pieRef.current, {
+          type: "doughnut",
+          data: {
+            labels: spendingByCat.map(([k])=>k),
+            datasets: [{
+              data: spendingByCat.map(([,v])=>v),
+              backgroundColor: spendingByCat.map(([k])=>CAT_COLORS[k]||"#9CA3AF"),
+              borderWidth: 2,
+              borderColor: "#fff",
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: "65%",
+            plugins: {
+              legend: { position:"right", labels:{ font:{size:11}, boxWidth:14, padding:12 } },
+              tooltip: { callbacks: { label: ctx => ` $${ctx.parsed.toLocaleString()} (${((ctx.parsed/totalSpend)*100).toFixed(0)}%)` } },
+            },
+          },
+        });
+        return () => { if (pieInst.current) pieInst.current.destroy(); };
+      }, [tab, spendingByCat]);
+
+      // Series completion
+      const seriesStats = useMemo(() => {
+        return seriesList.map(s => {
+          const owned = items.filter(i => i.series === s.name).length;
+          const pct   = s.total > 0 ? Math.min(100, Math.round(owned / s.total * 100)) : 0;
+          return { ...s, owned, pct };
+        }).sort((a,b) => b.pct - a.pct);
+      }, [seriesList, items]);
+
+      // Add series form
+      const [newName,  setNewName]  = useState("");
+      const [newTotal, setNewTotal] = useState("");
+      const [newCat,   setNewCat]   = useState("Pokemon Card");
+      const [adding,   setAdding]   = useState(false);
+
+      const handleAddSeries = async () => {
+        if (!newName.trim() || !newTotal) return;
+        setAdding(true);
+        await onAddSeries({ name: newName.trim(), total: parseInt(newTotal), category: newCat });
+        setNewName(""); setNewTotal(""); setAdding(false);
+      };
+
+      const CATS = allCats ? allCats.filter(c=>c!=="All") : DEFAULT_CATS;
+
+      return (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",backdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:20}}>
+          <div style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:760,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}}>
+
+            {/* Header */}
+            <div style={{padding:"24px 28px 0",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:22}}>📈</span>
+                <span style={{fontSize:18,fontWeight:800,color:"#111"}}>Data Insights</span>
+              </div>
+              <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:8,width:32,height:32,cursor:"pointer",fontSize:16,color:"#6B7280"}}>✕</button>
+            </div>
+
+            {/* Tabs */}
+            <div style={{padding:"16px 28px 0",display:"flex",gap:8}}>
+              {[["spending","💸 Spending"],["series","🏆 Series"]].map(([k,label])=>(
+                <button key={k} onClick={()=>setTab(k)} style={{padding:"8px 20px",borderRadius:20,fontSize:13,fontWeight:600,cursor:"pointer",border:tab===k?"2px solid #111":"1.5px solid #E5E7EB",background:tab===k?"#111":"#fff",color:tab===k?"#fff":"#6B7280"}}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div style={{padding:"20px 28px 28px"}}>
+
+              {/* ── SPENDING TAB ── */}
+              {tab === "spending" && (
+                <>
+                  {items.length === 0 ? (
+                    <div style={{textAlign:"center",padding:"40px 0",color:"#9CA3AF"}}>
+                      <div style={{fontSize:36,marginBottom:8}}>💸</div>
+                      <div style={{fontSize:13}}>Add some items to see spending stats!</div>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Total */}
+                      <div style={{textAlign:"center",marginBottom:20}}>
+                        <div style={{fontSize:12,fontWeight:600,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:0.8,marginBottom:4}}>Total Collection Value</div>
+                        <div style={{fontSize:36,fontWeight:900,color:"#111",letterSpacing:-1}}>${totalSpend.toLocaleString()}</div>
+                        <div style={{fontSize:12,color:"#9CA3AF",marginTop:2}}>{items.length} items across {spendingByCat.length} categories</div>
+                      </div>
+
+                      {/* Donut chart */}
+                      <div style={{height:220,marginBottom:24}}>
+                        <canvas ref={pieRef}/>
+                      </div>
+
+                      {/* Category breakdown bars */}
+                      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                        {spendingByCat.map(([cat, val], i) => {
+                          const pct = totalSpend > 0 ? (val/totalSpend*100) : 0;
+                          const col = CAT_COLORS[cat] || COLORS[i % COLORS.length];
+                          const count = items.filter(it=>it.category===cat).length;
+                          return (
+                            <div key={cat} style={{background:"#F8F8F8",borderRadius:12,padding:"14px 16px"}}>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                  <div style={{width:10,height:10,borderRadius:"50%",background:col,flexShrink:0}}/>
+                                  <span style={{fontSize:13,fontWeight:700,color:"#111"}}>{cat}</span>
+                                  <span style={{fontSize:11,color:"#9CA3AF"}}>{count} items</span>
+                                </div>
+                                <div style={{textAlign:"right"}}>
+                                  <span style={{fontSize:15,fontWeight:800,color:"#111"}}>${val.toLocaleString()}</span>
+                                  <span style={{fontSize:11,color:"#9CA3AF",marginLeft:6}}>{pct.toFixed(0)}%</span>
+                                </div>
+                              </div>
+                              <div style={{height:6,background:"#E5E7EB",borderRadius:10,overflow:"hidden"}}>
+                                <div style={{height:"100%",width:`${pct}%`,background:col,borderRadius:10,transition:"width 0.6s ease"}}/>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Fun insight */}
+                      {spendingByCat.length > 0 && (
+                        <div style={{marginTop:16,padding:"14px 18px",background:"#FFF7ED",borderRadius:12,border:"1px solid #FED7AA"}}>
+                          <span style={{fontSize:13,color:"#C2410C"}}>
+                            🔥 你最大洗費係 <strong>{spendingByCat[0][0]}</strong>，佔總值 <strong>{(spendingByCat[0][1]/totalSpend*100).toFixed(0)}%</strong>！
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+
+              {/* ── SERIES TAB ── */}
+              {tab === "series" && (
+                <>
+                  {/* Add series form (admin only) */}
+                  {isAdmin && (
+                    <div style={{background:"#F8F8F8",borderRadius:14,padding:"16px",marginBottom:20}}>
+                      <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:12,textTransform:"uppercase",letterSpacing:0.5}}>+ Add New Series</div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        <input value={newName} onChange={e=>setNewName(e.target.value)} placeholder="Series name (e.g. Pokemon 151 White)"
+                          style={{flex:"2 1 160px",padding:"9px 12px",borderRadius:10,border:"1.5px solid #E5E7EB",fontSize:13,outline:"none"}}
+                          onFocus={e=>e.target.style.borderColor="#111"} onBlur={e=>e.target.style.borderColor="#E5E7EB"}/>
+                        <input value={newTotal} onChange={e=>setNewTotal(e.target.value)} placeholder="Total cards" type="number" min="1"
+                          style={{flex:"1 1 100px",padding:"9px 12px",borderRadius:10,border:"1.5px solid #E5E7EB",fontSize:13,outline:"none"}}
+                          onFocus={e=>e.target.style.borderColor="#111"} onBlur={e=>e.target.style.borderColor="#E5E7EB"}/>
+                        <select value={newCat} onChange={e=>setNewCat(e.target.value)}
+                          style={{flex:"1 1 120px",padding:"9px 12px",borderRadius:10,border:"1.5px solid #E5E7EB",fontSize:13,background:"#fff"}}>
+                          {CATS.map(c=><option key={c}>{c}</option>)}
+                        </select>
+                        <button onClick={handleAddSeries} disabled={adding||!newName||!newTotal} style={{padding:"9px 18px",background:"#111",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:adding?"not-allowed":"pointer",opacity:adding||!newName||!newTotal?0.5:1}}>
+                          {adding?"Adding…":"Add"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {seriesStats.length === 0 ? (
+                    <div style={{textAlign:"center",padding:"40px 0",color:"#9CA3AF"}}>
+                      <div style={{fontSize:36,marginBottom:8}}>🏆</div>
+                      <div style={{fontSize:13,fontWeight:600,marginBottom:4}}>No series yet!</div>
+                      <div style={{fontSize:12}}>{isAdmin ? "Add a series above to start tracking completion." : "Admin hasn't set up any series yet."}</div>
+                    </div>
+                  ) : (
+                    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                      {seriesStats.map(s => {
+                        const col = CAT_COLORS[s.category] || "#6B7280";
+                        const isComplete = s.pct >= 100;
+                        return (
+                          <div key={s.id} style={{background:isComplete?"#F0FDF4":"#fff",borderRadius:14,border:`1px solid ${isComplete?"#BBF7D0":"#F0F0F0"}`,padding:"16px 18px",boxShadow:"0 1px 6px rgba(0,0,0,0.04)"}}>
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+                              <div>
+                                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+                                  {isComplete && <span style={{fontSize:14}}>🎉</span>}
+                                  <span style={{fontSize:14,fontWeight:800,color:"#111"}}>{s.name}</span>
+                                </div>
+                                <div style={{fontSize:11,color:"#9CA3AF"}}>{s.category}</div>
+                              </div>
+                              <div style={{textAlign:"right",display:"flex",alignItems:"center",gap:10}}>
+                                <div>
+                                  <div style={{fontSize:24,fontWeight:900,color:isComplete?"#16A34A":col,letterSpacing:-0.5}}>{s.pct}%</div>
+                                  <div style={{fontSize:11,color:"#9CA3AF"}}>{s.owned}/{s.total}</div>
+                                </div>
+                                {isAdmin && (
+                                  <button onClick={()=>onDeleteSeries(s.id)} style={{background:"#FEF2F2",border:"none",borderRadius:8,padding:"5px 8px",fontSize:11,color:"#DC2626",cursor:"pointer"}}>✕</button>
+                                )}
+                              </div>
+                            </div>
+                            {/* Progress bar */}
+                            <div style={{height:10,background:"#F3F4F6",borderRadius:10,overflow:"hidden"}}>
+                              <div style={{height:"100%",width:`${s.pct}%`,background:isComplete?"#16A34A":col,borderRadius:10,transition:"width 0.8s ease",position:"relative"}}>
+                                {s.pct > 15 && <div style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",fontSize:8,color:"#fff",fontWeight:700}}>{s.pct}%</div>}
+                              </div>
+                            </div>
+                            {/* Missing count */}
+                            {!isComplete && (
+                              <div style={{marginTop:8,fontSize:11,color:"#9CA3AF"}}>
+                                仲差 <strong style={{color:col}}>{s.total - s.owned}</strong> 件就齊喇 💪
+                              </div>
+                            )}
+                            {isComplete && (
+                              <div style={{marginTop:8,fontSize:11,color:"#16A34A",fontWeight:600}}>✅ Series Complete!</div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     function compressImage(dataUrl, maxWidth = 600, quality = 0.78) {
       return new Promise(resolve => {
         const img = new Image();
@@ -298,10 +542,13 @@
       });
     }
 
-    const CATEGORIES = ["All","NBA Card","Pokemon Card","Jersey","Toy","Other"];
-    const CONDITIONS  = ["Mint","Near Mint","Excellent","Good","Fair"];
+    const DEFAULT_CATS    = ["NBA Card","Pokemon Card","Jersey","Toy","Other"];
+    const CATEGORIES_COL  = "categories";
+    const CONDITIONS      = ["Mint","Near Mint","Excellent","Good","Fair"];
     const CATEGORY_ICONS  = { "NBA Card":"🏀","Pokemon Card":"⚡","Jersey":"👕","Toy":"🎮","Other":"📦","All":"✨" };
     const CATEGORY_COLORS = { "NBA Card":"#E8522A","Pokemon Card":"#F5C518","Jersey":"#2563EB","Toy":"#16A34A","Other":"#9333EA" };
+    const EXTRA_CAT_COLORS = ["#0EA5E9","#F97316","#A855F7","#14B8A6","#F43F5E","#84CC16","#8B5CF6","#06B6D4","#D97706","#BE185D"];
+    const EXTRA_CAT_ICONS  = ["🎯","🎪","🎨","🎸","💎","🎲","🏅","🎭","👟","🎩","🪄","🏈","⚽","🎴","🖼️","📸"];
 
     function formatCurrency(val) {
       return new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",maximumFractionDigits:0}).format(val);
@@ -315,6 +562,151 @@
       };
       const c = colors[condition] || {bg:"#F3F4F6",text:"#374151"};
       return <span style={{background:c.bg,color:c.text,padding:"2px 10px",borderRadius:20,fontSize:11,fontWeight:600}}>{condition}</span>;
+    }
+
+    // ── Subcategory Adder (inline) ─────────────────────────────
+    function SubcatAdder({ category, onAdd }) {
+      const [open, setOpen] = useState(false);
+      const [name, setName] = useState("");
+      const inputRef = useRef(null);
+
+      useEffect(() => { if (open && inputRef.current) inputRef.current.focus(); }, [open]);
+
+      const handleAdd = async () => {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        await onAdd({ name: trimmed, category, createdAt: Date.now() });
+        setName(""); setOpen(false);
+      };
+
+      if (!open) return (
+        <button onClick={()=>setOpen(true)} style={{padding:"5px 12px",borderRadius:20,fontSize:12,fontWeight:600,border:"1.5px dashed #D1D5DB",background:"transparent",color:"#9CA3AF",cursor:"pointer",display:"flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}>
+          <span style={{fontSize:14}}>+</span> Subcategory
+        </button>
+      );
+
+      return (
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          <input ref={inputRef} value={name} onChange={e=>setName(e.target.value)}
+            onKeyDown={e=>{if(e.key==="Enter")handleAdd();if(e.key==="Escape")setOpen(false);}}
+            placeholder={`e.g. 151 Series…`}
+            style={{padding:"5px 10px",borderRadius:10,border:"1.5px solid #111",fontSize:12,outline:"none",width:160}}/>
+          <button onClick={handleAdd} style={{padding:"5px 12px",background:"#111",color:"#fff",border:"none",borderRadius:10,fontSize:12,fontWeight:700,cursor:"pointer"}}>Add</button>
+          <button onClick={()=>setOpen(false)} style={{padding:"5px 8px",background:"#F3F4F6",border:"none",borderRadius:10,fontSize:12,color:"#6B7280",cursor:"pointer"}}>✕</button>
+        </div>
+      );
+    }
+
+    // ── Manage Categories Modal ────────────────────────────────
+    function ManageCategoriesModal({ customCats, onClose, onAdd, onDelete }) {
+      const [name,    setName]    = useState("");
+      const [icon,    setIcon]    = useState("🎯");
+      const [adding,  setAdding]  = useState(false);
+
+      const ICON_OPTIONS = ["🎯","🎪","🎨","🎸","💎","🎲","🏅","🎭","👟","🎩","🪄","🏈","⚽","🎴","🖼️","📸","🚗","🎵","🧸","🪆"];
+      const nextColor = EXTRA_CAT_COLORS[customCats.length % EXTRA_CAT_COLORS.length];
+
+      const handleAdd = async () => {
+        if (!name.trim()) return;
+        const trimmed = name.trim();
+        if (DEFAULT_CATS.includes(trimmed) || customCats.some(c=>c.name===trimmed)) {
+          alert("That category already exists!"); return;
+        }
+        setAdding(true);
+        await onAdd({ name: trimmed, icon, color: nextColor, createdAt: Date.now() });
+        setName(""); setAdding(false);
+      };
+
+      return (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",backdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:20}}>
+          <div style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:520,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}}>
+
+            {/* Header */}
+            <div style={{padding:"24px 28px 0",display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:22}}>⚙️</span>
+                <span style={{fontSize:18,fontWeight:800,color:"#111"}}>Manage Categories</span>
+              </div>
+              <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:8,width:32,height:32,cursor:"pointer",fontSize:16,color:"#6B7280"}}>✕</button>
+            </div>
+
+            <div style={{padding:"0 28px 28px"}}>
+
+              {/* Add new category form */}
+              <div style={{background:"#F8F8F8",borderRadius:14,padding:18,marginBottom:24}}>
+                <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:14,textTransform:"uppercase",letterSpacing:0.5}}>+ Add New Category</div>
+
+                {/* Name input */}
+                <div style={{marginBottom:12}}>
+                  <label style={{fontSize:12,fontWeight:600,color:"#6B7280",display:"block",marginBottom:6}}>Category Name</label>
+                  <input value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleAdd()} placeholder="e.g. Sneakers, Comics…"
+                    style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1.5px solid #E5E7EB",fontSize:14,outline:"none",boxSizing:"border-box"}}
+                    onFocus={e=>e.target.style.borderColor="#111"} onBlur={e=>e.target.style.borderColor="#E5E7EB"}/>
+                </div>
+
+                {/* Icon picker */}
+                <div style={{marginBottom:14}}>
+                  <label style={{fontSize:12,fontWeight:600,color:"#6B7280",display:"block",marginBottom:8}}>Icon</label>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                    {ICON_OPTIONS.map(ic=>(
+                      <button key={ic} onClick={()=>setIcon(ic)} style={{width:36,height:36,fontSize:18,border:icon===ic?"2px solid #111":"1.5px solid #E5E7EB",borderRadius:8,cursor:"pointer",background:icon===ic?"#111":"#fff",transition:"all 0.15s"}}>
+                        {ic}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Color preview */}
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+                  <div style={{width:20,height:20,borderRadius:"50%",background:nextColor,border:"2px solid #fff",boxShadow:"0 0 0 1.5px #E5E7EB"}}/>
+                  <span style={{fontSize:12,color:"#6B7280"}}>Auto-assigned colour</span>
+                </div>
+
+                <button onClick={handleAdd} disabled={adding||!name.trim()}
+                  style={{width:"100%",padding:"10px",background:"#111",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:adding||!name.trim()?"not-allowed":"pointer",opacity:adding||!name.trim()?0.5:1}}>
+                  {adding?"Adding…":"Add Category"}
+                </button>
+              </div>
+
+              {/* Default categories (locked) */}
+              <div style={{fontSize:12,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>Default Categories</div>
+              <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
+                {DEFAULT_CATS.map(c=>(
+                  <div key={c} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",background:"#F8F8F8",borderRadius:10,border:"1px solid #F0F0F0"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <span style={{fontSize:18}}>{CATEGORY_ICONS[c]||"📦"}</span>
+                      <span style={{fontSize:14,fontWeight:600,color:"#374151"}}>{c}</span>
+                    </div>
+                    <span style={{fontSize:11,color:"#9CA3AF",background:"#F3F4F6",padding:"2px 10px",borderRadius:20}}>default</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Custom categories */}
+              {customCats.length > 0 && (
+                <>
+                  <div style={{fontSize:12,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>Custom Categories</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {customCats.map(c=>(
+                      <div key={c.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",background:"#fff",borderRadius:10,border:"1px solid #F0F0F0",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10}}>
+                          <div style={{width:28,height:28,borderRadius:8,background:c.color,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15}}>{c.icon}</div>
+                          <span style={{fontSize:14,fontWeight:600,color:"#111"}}>{c.name}</span>
+                        </div>
+                        <button onClick={()=>onDelete(c.id, c.name)} style={{background:"#FEF2F2",border:"none",borderRadius:8,padding:"5px 10px",fontSize:12,color:"#DC2626",cursor:"pointer",fontWeight:600}}>Delete</button>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {customCats.length === 0 && (
+                <div style={{textAlign:"center",padding:"20px 0",color:"#9CA3AF",fontSize:13}}>No custom categories yet — add one above!</div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
     }
 
     function PasswordModal({ onSuccess, onClose }) {
@@ -379,6 +771,13 @@
               <ConditionBadge condition={item.condition}/>
               <span style={{fontSize:12,color:"#9CA3AF"}}>{item.year}</span>
             </div>
+            {item.subcategory && (
+              <div style={{marginBottom:8}}>
+                <span style={{background:catColor+"18",color:catColor,borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>
+                  {item.subcategory}
+                </span>
+              </div>
+            )}
             {item.notes && <div style={{fontSize:12,color:"#6B7280",marginBottom:10,fontStyle:"italic"}}>{item.notes}</div>}
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",borderTop:"1px solid #F5F5F5",paddingTop:12,marginTop:4}}>
               <div style={{fontSize:20,fontWeight:800,color:"#111"}}>{formatCurrency(item.value)}</div>
@@ -442,10 +841,19 @@
       );
     }
 
-    function Modal({ item, onSave, onClose }) {
-      const [form, setForm] = useState(item || {name:"",category:"NBA Card",condition:"Near Mint",value:"",year:new Date().getFullYear(),notes:"",image:null});
+    function Modal({ item, seriesList, allCats, subcategories, onSave, onClose }) {
+      const [form, setForm] = useState(item || {name:"",category:"NBA Card",condition:"Near Mint",value:"",year:new Date().getFullYear(),notes:"",image:null,series:"",subcategory:""});
       const [saving, setSaving] = useState(false);
       const handleChange = (k,v) => setForm(f=>({...f,[k]:v}));
+
+      // Reset subcategory when category changes
+      const handleCatChange = (v) => setForm(f=>({...f, category:v, subcategory:""}));
+
+      // Subcats available for the currently selected category
+      const availableSubcats = useMemo(() =>
+        (subcategories||[]).filter(s => s.category === form.category),
+        [subcategories, form.category]
+      );
 
       const handleSave = async () => {
         if (!form.name || !form.value) return alert("Please fill in name and value.");
@@ -477,12 +885,32 @@
             ))}
             <div style={{marginBottom:16}}>
               <label style={{display:"block",fontSize:13,fontWeight:600,color:"#374151",marginBottom:6}}>Category</label>
-              <select value={form.category} onChange={e=>handleChange("category",e.target.value)}
+              <select value={form.category} onChange={e=>handleCatChange(e.target.value)}
                 style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1.5px solid #E5E7EB",fontSize:14,background:"#fff",cursor:"pointer"}}>
-                {CATEGORIES.filter(c=>c!=="All").map(c=><option key={c}>{c}</option>)}
+                {(allCats||[...DEFAULT_CATS,"Other"]).filter(c=>c!=="All").map(c=><option key={c}>{c}</option>)}
               </select>
             </div>
-            <div style={{marginBottom:24}}>
+
+            {availableSubcats.length > 0 && (
+              <div style={{marginBottom:16}}>
+                <label style={{display:"block",fontSize:13,fontWeight:600,color:"#374151",marginBottom:6}}>
+                  Subcategory <span style={{fontWeight:400,color:"#9CA3AF"}}>(optional)</span>
+                </label>
+                <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                  <button type="button" onClick={()=>handleChange("subcategory","")}
+                    style={{padding:"6px 14px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",border:!form.subcategory?"2px solid #111":"1.5px solid #E5E7EB",background:!form.subcategory?"#111":"#fff",color:!form.subcategory?"#fff":"#6B7280"}}>
+                    None
+                  </button>
+                  {availableSubcats.map(s=>(
+                    <button key={s.id} type="button" onClick={()=>handleChange("subcategory",s.name)}
+                      style={{padding:"6px 14px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",border:form.subcategory===s.name?"2px solid #111":"1.5px solid #E5E7EB",background:form.subcategory===s.name?"#111":"#fff",color:form.subcategory===s.name?"#fff":"#6B7280"}}>
+                      {s.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div style={{marginBottom:16}}>
               <label style={{display:"block",fontSize:13,fontWeight:600,color:"#374151",marginBottom:6}}>Condition</label>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                 {CONDITIONS.map(c=>(
@@ -490,6 +918,16 @@
                 ))}
               </div>
             </div>
+            {seriesList && seriesList.length > 0 && (
+              <div style={{marginBottom:24}}>
+                <label style={{display:"block",fontSize:13,fontWeight:600,color:"#374151",marginBottom:6}}>Series <span style={{fontWeight:400,color:"#9CA3AF"}}>(optional)</span></label>
+                <select value={form.series||""} onChange={e=>handleChange("series",e.target.value)}
+                  style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1.5px solid #E5E7EB",fontSize:14,background:"#fff",cursor:"pointer"}}>
+                  <option value="">— None —</option>
+                  {seriesList.map(s=><option key={s.id} value={s.name}>{s.name} ({s.category})</option>)}
+                </select>
+              </div>
+            )}
             <button onClick={handleSave} disabled={saving} style={{width:"100%",padding:"13px",background:saving?"#666":"#111",color:"#fff",border:"none",borderRadius:12,fontSize:15,fontWeight:700,cursor:saving?"not-allowed":"pointer"}}>
               {saving ? "Saving…" : (item&&item.id?"Save Changes":"Add to Collection")}
             </button>
@@ -499,17 +937,23 @@
     }
 
     function App() {
-      const [items,      setItems]      = useState([]);
-      const [loading,    setLoading]    = useState(true);
-      const [isAdmin,    setIsAdmin]    = useState(false);
-      const [showPwModal,setShowPwModal]= useState(false);
-      const [selectedCat,setSelectedCat]= useState("All");
-      const [search,     setSearch]     = useState("");
-      const [sortBy,     setSortBy]     = useState("dateAdded");
-      const [sortDir,    setSortDir]    = useState("desc");
-      const [modal,      setModal]      = useState(null);
-      const [viewMode,   setViewMode]   = useState("grid");
-      const [priceItem,  setPriceItem]  = useState(null);
+      const [items,        setItems]        = useState([]);
+      const [seriesList,   setSeriesList]   = useState([]);
+      const [customCats,   setCustomCats]   = useState([]);
+      const [subcategories,setSubcategories]= useState([]);
+      const [loading,      setLoading]      = useState(true);
+      const [isAdmin,      setIsAdmin]      = useState(false);
+      const [showPwModal,  setShowPwModal]  = useState(false);
+      const [showInsights, setShowInsights] = useState(false);
+      const [showCatModal, setShowCatModal] = useState(false);
+      const [selectedCat,  setSelectedCat]  = useState("All");
+      const [selectedSubcat,setSelectedSubcat]= useState("All");
+      const [search,       setSearch]       = useState("");
+      const [sortBy,       setSortBy]       = useState("dateAdded");
+      const [sortDir,      setSortDir]      = useState("desc");
+      const [modal,        setModal]        = useState(null);
+      const [viewMode,     setViewMode]     = useState("grid");
+      const [priceItem,    setPriceItem]    = useState(null);
 
       useEffect(() => {
         const unsub = db.collection(ITEMS_COL)
@@ -520,6 +964,78 @@
           }, err => { console.error(err); setLoading(false); });
         return unsub;
       }, []);
+
+      useEffect(() => {
+        const unsub = db.collection(SERIES_COL)
+          .onSnapshot(snap => {
+            setSeriesList(snap.docs.map(d=>({id:d.id,...d.data()})));
+          }, err => console.error(err));
+        return unsub;
+      }, []);
+
+      useEffect(() => {
+        const unsub = db.collection(CATEGORIES_COL)
+          .orderBy("createdAt","asc")
+          .onSnapshot(snap => {
+            const cats = snap.docs.map(d=>({id:d.id,...d.data()}));
+            setCustomCats(cats);
+            // Sync into shared lookup objects so all components pick them up
+            cats.forEach(c => {
+              CATEGORY_COLORS[c.name] = c.color;
+              CATEGORY_ICONS[c.name]  = c.icon;
+            });
+          }, err => console.error(err));
+        return unsub;
+      }, []);
+
+      const allCategories = useMemo(() => {
+        const customNames = customCats.map(c=>c.name).filter(n=>!DEFAULT_CATS.includes(n));
+        return ["All", ...DEFAULT_CATS, ...customNames];
+      }, [customCats]);
+
+      const handleAddCat = async (data) => {
+        await db.collection(CATEGORIES_COL).add(data);
+      };
+      const handleDeleteCat = async (id, name) => {
+        if (window.confirm(`Delete "${name}"? Items in this category won't be deleted.`)) {
+          await db.collection(CATEGORIES_COL).doc(id).delete();
+          delete CATEGORY_COLORS[name];
+          delete CATEGORY_ICONS[name];
+        }
+      };
+
+      useEffect(() => {
+        const unsub = db.collection(SUBCATS_COL)
+          .orderBy("createdAt","asc")
+          .onSnapshot(snap => {
+            setSubcategories(snap.docs.map(d=>({id:d.id,...d.data()})));
+          }, err => console.error(err));
+        return unsub;
+      }, []);
+
+      const handleAddSubcat = async (data) => {
+        await db.collection(SUBCATS_COL).add(data);
+      };
+      const handleDeleteSubcat = async (id) => {
+        await db.collection(SUBCATS_COL).doc(id).delete();
+      };
+
+      // When category changes, reset subcategory filter
+      useEffect(() => { setSelectedSubcat("All"); }, [selectedCat]);
+
+      // Subcats for the currently selected category
+      const currentSubcats = useMemo(() =>
+        subcategories.filter(s => s.category === selectedCat),
+        [subcategories, selectedCat]
+      );
+
+      const handleAddSeries = async (data) => {
+        await db.collection(SERIES_COL).add(data);
+      };
+
+      const handleDeleteSeries = async (id) => {
+        await db.collection(SERIES_COL).doc(id).delete();
+      };
 
       const handleSave = async (form) => {
         const data = {...form};
@@ -541,6 +1057,7 @@
       const filtered = useMemo(() => {
         let arr = items;
         if (selectedCat !== "All") arr = arr.filter(i=>i.category===selectedCat);
+        if (selectedSubcat !== "All") arr = arr.filter(i=>i.subcategory===selectedSubcat);
         if (search.trim()) {
           const s = search.toLowerCase();
           arr = arr.filter(i=>i.name.toLowerCase().includes(s)||(i.notes&&i.notes.toLowerCase().includes(s))||String(i.year).includes(s));
@@ -552,18 +1069,18 @@
           if (va>vb) return sortDir==="asc"?1:-1;
           return 0;
         });
-      }, [items,selectedCat,search,sortBy,sortDir]);
+      }, [items,selectedCat,selectedSubcat,search,sortBy,sortDir]);
 
       const stats = useMemo(() => {
         const totalValue = items.reduce((s,i)=>s+i.value,0);
         const byCat = {};
-        CATEGORIES.filter(c=>c!=="All").forEach(c=>{
+        allCategories.filter(c=>c!=="All").forEach(c=>{
           const ci=items.filter(i=>i.category===c);
           byCat[c]={count:ci.length,value:ci.reduce((s,i)=>s+i.value,0)};
         });
         const topItem = items.length?items.reduce((a,b)=>a.value>b.value?a:b):null;
         return {totalValue,byCat,topItem,total:items.length};
-      }, [items]);
+      }, [items, allCategories]);
 
       return (
         <div style={{fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",background:"#FAFAFA",minHeight:"100vh",color:"#111"}}>
@@ -580,6 +1097,9 @@
                   </div>
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <button onClick={()=>setShowInsights(true)} style={{background:"#F3F4F6",color:"#374151",border:"1.5px solid #E5E7EB",borderRadius:10,padding:"8px 16px",fontSize:13,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
+                    📈 Insights
+                  </button>
                   {isAdmin ? (
                     <>
                       <button onClick={()=>setModal("add")} style={{background:"#111",color:"#fff",border:"none",borderRadius:10,padding:"9px 18px",fontSize:13,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
@@ -613,7 +1133,7 @@
                     {label:"Total Items",value:stats.total,sub:"in collection",icon:"📦",color:"#111"},
                     {label:"Portfolio Value",value:formatCurrency(stats.totalValue),sub:"estimated",icon:"💰",color:"#16A34A"},
                     {label:"Top Item",value:stats.topItem?stats.topItem.name.slice(0,22)+(stats.topItem.name.length>22?"…":""):"—",sub:stats.topItem?formatCurrency(stats.topItem.value):"",icon:"⭐",color:"#E8522A"},
-                    {label:"Categories",value:CATEGORIES.filter(c=>c!=="All"&&stats.byCat[c]&&stats.byCat[c].count>0).length,sub:"active",icon:"🗂️",color:"#2563EB"},
+                    {label:"Categories",value:allCategories.filter(c=>c!=="All"&&stats.byCat[c]&&stats.byCat[c].count>0).length,sub:"active",icon:"🗂️",color:"#2563EB"},
                   ].map(s=>(
                     <div key={s.label} style={{background:"#fff",borderRadius:16,padding:"20px 22px",border:"1px solid #F0F0F0",boxShadow:"0 1px 8px rgba(0,0,0,0.04)"}}>
                       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
@@ -630,22 +1150,22 @@
                 <div style={{background:"#fff",borderRadius:16,padding:"20px 22px",border:"1px solid #F0F0F0",marginBottom:28,boxShadow:"0 1px 8px rgba(0,0,0,0.04)"}}>
                   <div style={{fontSize:13,fontWeight:700,color:"#111",marginBottom:14}}>Collection Breakdown</div>
                   <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
-                    {CATEGORIES.filter(c=>c!=="All").map(c=>{
+                    {allCategories.filter(c=>c!=="All").map(c=>{
                       const d=stats.byCat[c];
                       if (!d||d.count===0) return null;
                       const pct=stats.total>0?Math.round((d.count/stats.total)*100):0;
                       return (
                         <div key={c} style={{flex:"1 1 140px",minWidth:120}}>
                           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-                            <div style={{fontSize:12,fontWeight:600,color:"#374151",display:"flex",alignItems:"center",gap:5}}><span>{CATEGORY_ICONS[c]}</span>{c}</div>
+                            <div style={{fontSize:12,fontWeight:600,color:"#374151",display:"flex",alignItems:"center",gap:5}}><span>{CATEGORY_ICONS[c]||"📦"}</span>{c}</div>
                             <span style={{fontSize:11,color:"#9CA3AF"}}>{d.count} items</span>
                           </div>
                           <div style={{height:5,background:"#F3F4F6",borderRadius:10,overflow:"hidden"}}>
-                            <div style={{height:"100%",width:`${pct}%`,background:CATEGORY_COLORS[c]||"#111",borderRadius:10}}/>
+                            <div style={{height:"100%",width:`${pct}%`,background:CATEGORY_COLORS[c]||"#6B7280",borderRadius:10}}/>
                           </div>
                           <div style={{display:"flex",justifyContent:"space-between",marginTop:5}}>
                             <span style={{fontSize:11,color:"#9CA3AF"}}>{pct}%</span>
-                            <span style={{fontSize:11,fontWeight:700,color:CATEGORY_COLORS[c]}}>{formatCurrency(d.value)}</span>
+                            <span style={{fontSize:11,fontWeight:700,color:CATEGORY_COLORS[c]||"#6B7280"}}>{formatCurrency(d.value)}</span>
                           </div>
                         </div>
                       );
@@ -677,18 +1197,53 @@
                 </div>
 
                 {/* Category Tabs */}
-                <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap"}}>
-                  {CATEGORIES.map(c=>{
+                <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap",alignItems:"center"}}>
+                  {allCategories.map(c=>{
                     const count=c==="All"?items.length:(stats.byCat[c]?stats.byCat[c].count:0);
                     const active=selectedCat===c;
                     return (
                       <button key={c} onClick={()=>setSelectedCat(c)} style={{padding:"7px 16px",borderRadius:20,fontSize:13,fontWeight:600,border:active?"2px solid #111":"1.5px solid #E5E7EB",background:active?"#111":"#fff",color:active?"#fff":"#6B7280",cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
-                        <span>{CATEGORY_ICONS[c]}</span>{c}
+                        <span>{CATEGORY_ICONS[c]||"📦"}</span>{c}
                         <span style={{background:active?"rgba(255,255,255,0.2)":"#F3F4F6",color:active?"#fff":"#9CA3AF",borderRadius:10,padding:"1px 7px",fontSize:11,fontWeight:700}}>{count}</span>
                       </button>
                     );
                   })}
+                  {isAdmin && (
+                    <button onClick={()=>setShowCatModal(true)} style={{padding:"7px 14px",borderRadius:20,fontSize:13,fontWeight:600,border:"1.5px dashed #D1D5DB",background:"transparent",color:"#9CA3AF",cursor:"pointer",display:"flex",alignItems:"center",gap:5}}>
+                      <span style={{fontSize:15}}>+</span> Category
+                    </button>
+                  )}
                 </div>
+
+                {/* Subcategory pills — shown when a category with subcats is selected */}
+                {selectedCat !== "All" && (currentSubcats.length > 0 || isAdmin) && (
+                  <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap",alignItems:"center",paddingLeft:4}}>
+                    <span style={{fontSize:11,fontWeight:600,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:0.5,marginRight:4}}>↳</span>
+                    <button onClick={()=>setSelectedSubcat("All")}
+                      style={{padding:"4px 14px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",border:selectedSubcat==="All"?"2px solid #374151":"1.5px solid #E5E7EB",background:selectedSubcat==="All"?"#374151":"#fff",color:selectedSubcat==="All"?"#fff":"#6B7280"}}>
+                      All
+                    </button>
+                    {currentSubcats.map(s => {
+                      const active = selectedSubcat === s.name;
+                      const col = CATEGORY_COLORS[selectedCat] || "#374151";
+                      return (
+                        <div key={s.id} style={{display:"flex",alignItems:"center",gap:0,borderRadius:20,border:active?`2px solid ${col}`:"1.5px solid #E5E7EB",background:active?col:"#fff",overflow:"hidden"}}>
+                          <button onClick={()=>setSelectedSubcat(active?"All":s.name)}
+                            style={{padding:"4px 12px",fontSize:12,fontWeight:600,cursor:"pointer",border:"none",background:"transparent",color:active?"#fff":"#6B7280"}}>
+                            {s.name}
+                          </button>
+                          {isAdmin && (
+                            <button onClick={()=>handleDeleteSubcat(s.id)}
+                              style={{padding:"4px 8px 4px 0",fontSize:10,border:"none",background:"transparent",color:active?"rgba(255,255,255,0.7)":"#9CA3AF",cursor:"pointer",lineHeight:1}}>
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {isAdmin && <SubcatAdder category={selectedCat} onAdd={handleAddSubcat}/>}
+                  </div>
+                )}
 
                 <div style={{fontSize:13,color:"#9CA3AF",marginBottom:16,fontWeight:500}}>
                   Showing {filtered.length} of {items.length} items
@@ -725,6 +1280,7 @@
                         </div>
                         <div>
                           <div style={{fontWeight:700,color:"#111",marginBottom:2}}>{item.name}</div>
+                          {item.subcategory&&<div style={{fontSize:11,color:CATEGORY_COLORS[item.category]||"#6B7280",fontWeight:600}}>{item.subcategory}</div>}
                           {item.notes&&<div style={{fontSize:11,color:"#9CA3AF",fontStyle:"italic"}}>{item.notes}</div>}
                         </div>
                         <div style={{display:"flex",alignItems:"center",gap:6}}><span>{CATEGORY_ICONS[item.category]}</span><span style={{fontSize:12,color:"#374151",fontWeight:500}}>{item.category}</span></div>
@@ -747,8 +1303,10 @@
           </div>
 
           {showPwModal && <PasswordModal onSuccess={()=>{setIsAdmin(true);setShowPwModal(false);}} onClose={()=>setShowPwModal(false)}/>}
-          {modal && <Modal item={modal==="add"?null:modal} onSave={handleSave} onClose={()=>setModal(null)}/>}
+          {showCatModal && <ManageCategoriesModal customCats={customCats} onClose={()=>setShowCatModal(false)} onAdd={handleAddCat} onDelete={handleDeleteCat}/>}
+          {modal && <Modal item={modal==="add"?null:modal} seriesList={seriesList} allCats={allCategories} subcategories={subcategories} onSave={handleSave} onClose={()=>setModal(null)}/>}
           {priceItem && <PriceTrackerModal item={priceItem} onClose={()=>setPriceItem(null)}/>}
+          {showInsights && <InsightsModal items={items} seriesList={seriesList} allCats={allCategories} isAdmin={isAdmin} onClose={()=>setShowInsights(false)} onAddSeries={handleAddSeries} onDeleteSeries={handleDeleteSeries}/>}
         </div>
       );
     }

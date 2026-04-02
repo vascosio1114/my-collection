@@ -571,39 +571,55 @@
       const [overlay, setOverlay] = useState(current?.overlay ?? 0.25);
       const [blur,    setBlur]    = useState(current?.blur ?? 0);
       const [saving,  setSaving]  = useState(false);
+      const [saveError, setSaveError] = useState("");
       const inputRef  = useRef(null);
       const [dragging,setDragging]= useState(false);
       const [compressing,setCompressing] = useState(false);
+      const [imgSize,  setImgSize] = useState(0); // kb
+
+      const compressToTarget = (dataUrl, maxW, quality) => new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => {
+          let w = img.width, h = img.height;
+          if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
+          const canvas = document.createElement("canvas");
+          canvas.width = w; canvas.height = h;
+          canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL("image/jpeg", quality));
+        };
+        img.src = dataUrl;
+      });
 
       const processFile = useCallback(async (file) => {
         if (!file || !file.type.startsWith("image/")) return;
-        setCompressing(true);
+        setCompressing(true); setSaveError("");
         const reader = new FileReader();
         reader.onload = async (e) => {
-          // Compress for background use: wider max, lower quality
-          const img = new Image();
-          img.onload = () => {
-            let w = img.width, h = img.height;
-            const maxW = 1400;
-            if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
-            const canvas = document.createElement("canvas");
-            canvas.width = w; canvas.height = h;
-            canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-            const compressed = canvas.toDataURL("image/jpeg", 0.65);
-            setPreview(compressed);
-            setCompressing(false);
-          };
-          img.src = e.target.result;
+          // Start at 900px / quality 0.6, shrink further if still too large for Firestore
+          let result = await compressToTarget(e.target.result, 900, 0.6);
+          // Firestore doc limit ~800KB base64 to be safe
+          if (result.length > 800000) result = await compressToTarget(e.target.result, 650, 0.5);
+          if (result.length > 800000) result = await compressToTarget(e.target.result, 450, 0.45);
+          setImgSize(Math.round(result.length / 1024));
+          setPreview(result);
+          setCompressing(false);
         };
         reader.readAsDataURL(file);
       }, []);
 
       const handleSave = async () => {
         if (!preview) return;
-        setSaving(true);
-        await onSave({ image: preview, overlay, blur });
-        setSaving(false);
-        onClose();
+        setSaving(true); setSaveError("");
+        try {
+          await onSave({ image: preview, overlay, blur });
+          setSaving(false);
+          onClose();
+        } catch(e) {
+          setSaving(false);
+          setSaveError(e?.message?.includes("exceeds")
+            ? "圖片太大，請用更細嘅圖片試試"
+            : "Save 失敗：" + (e?.message || "未知錯誤"));
+        }
       };
 
       return (
@@ -671,6 +687,20 @@
                 </>
               )}
 
+              {/* Size indicator */}
+              {preview && imgSize > 0 && (
+                <div style={{fontSize:11,color: imgSize > 700 ? "#DC2626" : "#9CA3AF",marginBottom:10,textAlign:"right"}}>
+                  圖片大小：{imgSize}KB {imgSize > 700 ? "⚠️ 可能太大" : "✓"}
+                </div>
+              )}
+
+              {/* Error message */}
+              {saveError && (
+                <div style={{background:"#FEF2F2",borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:13,color:"#DC2626",fontWeight:500}}>
+                  ⚠️ {saveError}
+                </div>
+              )}
+
               {/* Buttons */}
               <div style={{display:"flex",gap:10}}>
                 {current?.image && (
@@ -680,7 +710,7 @@
                 )}
                 <button onClick={handleSave} disabled={saving||!preview}
                   style={{flex:2,padding:"11px",background:saving||!preview?"#9CA3AF":"#111",color:"#fff",border:"none",borderRadius:12,fontSize:14,fontWeight:700,cursor:saving||!preview?"not-allowed":"pointer"}}>
-                  {saving?"Saving…":"✓ Apply Background"}
+                  {saving ? <span>⏳ Saving…</span> : "✓ Apply Background"}
                 </button>
               </div>
             </div>

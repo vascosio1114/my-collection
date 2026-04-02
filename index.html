@@ -43,9 +43,10 @@
 
     const app = firebase.initializeApp(FIREBASE_CONFIG);
     const db  = firebase.firestore();
-    const ITEMS_COL   = "items";
-    const SERIES_COL  = "series";
-    const SUBCATS_COL = "subcategories";
+    const ITEMS_COL    = "items";
+    const SERIES_COL   = "series";
+    const SUBCATS_COL  = "subcategories";
+    const SETTINGS_COL = "settings";
 
     // ── eBay JSONP Search ──────────────────────────────────────
     function searchEbaySold(keywords) {
@@ -564,6 +565,130 @@
       return <span style={{background:c.bg,color:c.text,padding:"2px 10px",borderRadius:20,fontSize:11,fontWeight:600}}>{condition}</span>;
     }
 
+    // ── Background Modal ───────────────────────────────────────
+    function BackgroundModal({ current, onSave, onRemove, onClose }) {
+      const [preview, setPreview] = useState(current?.image || null);
+      const [overlay, setOverlay] = useState(current?.overlay ?? 0.25);
+      const [blur,    setBlur]    = useState(current?.blur ?? 0);
+      const [saving,  setSaving]  = useState(false);
+      const inputRef  = useRef(null);
+      const [dragging,setDragging]= useState(false);
+      const [compressing,setCompressing] = useState(false);
+
+      const processFile = useCallback(async (file) => {
+        if (!file || !file.type.startsWith("image/")) return;
+        setCompressing(true);
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          // Compress for background use: wider max, lower quality
+          const img = new Image();
+          img.onload = () => {
+            let w = img.width, h = img.height;
+            const maxW = 1400;
+            if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
+            const canvas = document.createElement("canvas");
+            canvas.width = w; canvas.height = h;
+            canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+            const compressed = canvas.toDataURL("image/jpeg", 0.65);
+            setPreview(compressed);
+            setCompressing(false);
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      }, []);
+
+      const handleSave = async () => {
+        if (!preview) return;
+        setSaving(true);
+        await onSave({ image: preview, overlay, blur });
+        setSaving(false);
+        onClose();
+      };
+
+      return (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",backdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:20}}>
+          <div style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:560,maxHeight:"92vh",overflowY:"auto",boxShadow:"0 24px 64px rgba(0,0,0,0.25)"}}>
+
+            {/* Header */}
+            <div style={{padding:"24px 28px 0",display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:22}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:22}}>🖼️</span>
+                <span style={{fontSize:18,fontWeight:800,color:"#111"}}>Background Image</span>
+              </div>
+              <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:8,width:32,height:32,cursor:"pointer",fontSize:16,color:"#6B7280"}}>✕</button>
+            </div>
+
+            <div style={{padding:"0 28px 28px"}}>
+
+              {/* Upload zone */}
+              {preview ? (
+                <div style={{position:"relative",borderRadius:14,overflow:"hidden",height:200,marginBottom:20,boxShadow:"0 4px 20px rgba(0,0,0,0.12)"}}>
+                  <img src={preview} alt="bg preview" style={{width:"100%",height:"100%",objectFit:"cover",filter:`blur(${blur}px)`}}/>
+                  <div style={{position:"absolute",inset:0,background:`rgba(0,0,0,${overlay})`}}/>
+                  <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
+                    <button onClick={()=>inputRef.current.click()} style={{background:"rgba(255,255,255,0.9)",border:"none",borderRadius:10,padding:"8px 16px",fontSize:12,fontWeight:700,cursor:"pointer",color:"#111"}}>Change Photo</button>
+                    <button onClick={()=>setPreview(null)} style={{background:"rgba(220,38,38,0.85)",border:"none",borderRadius:10,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer",color:"#fff"}}>Remove</button>
+                  </div>
+                </div>
+              ) : (
+                <div onClick={()=>inputRef.current.click()}
+                  onDragOver={e=>{e.preventDefault();setDragging(true);}}
+                  onDragLeave={()=>setDragging(false)}
+                  onDrop={e=>{e.preventDefault();setDragging(false);processFile(e.dataTransfer.files[0]);}}
+                  style={{border:`2px dashed ${dragging?"#111":"#D1D5DB"}`,borderRadius:14,height:160,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",background:dragging?"#F9F9F9":"#FAFAFA",gap:10,marginBottom:20}}>
+                  {compressing
+                    ? <><span style={{fontSize:28}} className="spinner">⏳</span><div style={{fontSize:13,color:"#9CA3AF"}}>Compressing…</div></>
+                    : <><span style={{fontSize:36}}>🖼️</span><div style={{fontSize:14,fontWeight:600,color:"#374151"}}>Click to upload or drag & drop</div><div style={{fontSize:12,color:"#9CA3AF"}}>JPG, PNG, WEBP — recommended landscape</div></>
+                  }
+                </div>
+              )}
+              <input ref={inputRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>processFile(e.target.files[0])}/>
+
+              {/* Controls */}
+              {preview && (
+                <>
+                  <div style={{marginBottom:18}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                      <label style={{fontSize:13,fontWeight:600,color:"#374151"}}>Dark Overlay</label>
+                      <span style={{fontSize:12,color:"#9CA3AF",fontWeight:600}}>{Math.round(overlay*100)}%</span>
+                    </div>
+                    <input type="range" min="0" max="0.75" step="0.05" value={overlay}
+                      onChange={e=>setOverlay(parseFloat(e.target.value))}
+                      style={{width:"100%",accentColor:"#111"}}/>
+                    <div style={{fontSize:11,color:"#9CA3AF",marginTop:4}}>Higher overlay makes text easier to read over the background</div>
+                  </div>
+
+                  <div style={{marginBottom:22}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                      <label style={{fontSize:13,fontWeight:600,color:"#374151"}}>Background Blur</label>
+                      <span style={{fontSize:12,color:"#9CA3AF",fontWeight:600}}>{blur}px</span>
+                    </div>
+                    <input type="range" min="0" max="20" step="1" value={blur}
+                      onChange={e=>setBlur(parseInt(e.target.value))}
+                      style={{width:"100%",accentColor:"#111"}}/>
+                  </div>
+                </>
+              )}
+
+              {/* Buttons */}
+              <div style={{display:"flex",gap:10}}>
+                {current?.image && (
+                  <button onClick={async()=>{await onRemove();onClose();}} style={{flex:1,padding:"11px",background:"#FEF2F2",color:"#DC2626",border:"none",borderRadius:12,fontSize:14,fontWeight:600,cursor:"pointer"}}>
+                    🗑️ Remove Background
+                  </button>
+                )}
+                <button onClick={handleSave} disabled={saving||!preview}
+                  style={{flex:2,padding:"11px",background:saving||!preview?"#9CA3AF":"#111",color:"#fff",border:"none",borderRadius:12,fontSize:14,fontWeight:700,cursor:saving||!preview?"not-allowed":"pointer"}}>
+                  {saving?"Saving…":"✓ Apply Background"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     // ── Subcategory Adder (inline) ─────────────────────────────
     function SubcatAdder({ category, onAdd }) {
       const [open, setOpen] = useState(false);
@@ -941,11 +1066,13 @@
       const [seriesList,   setSeriesList]   = useState([]);
       const [customCats,   setCustomCats]   = useState([]);
       const [subcategories,setSubcategories]= useState([]);
+      const [bgSettings,   setBgSettings]   = useState(null);
       const [loading,      setLoading]      = useState(true);
       const [isAdmin,      setIsAdmin]      = useState(false);
       const [showPwModal,  setShowPwModal]  = useState(false);
       const [showInsights, setShowInsights] = useState(false);
       const [showCatModal, setShowCatModal] = useState(false);
+      const [showBgModal,  setShowBgModal]  = useState(false);
       const [selectedCat,  setSelectedCat]  = useState("All");
       const [selectedSubcat,setSelectedSubcat]= useState("All");
       const [search,       setSearch]       = useState("");
@@ -964,6 +1091,21 @@
           }, err => { console.error(err); setLoading(false); });
         return unsub;
       }, []);
+
+      useEffect(() => {
+        const unsub = db.collection(SETTINGS_COL).doc("background")
+          .onSnapshot(snap => {
+            setBgSettings(snap.exists ? snap.data() : null);
+          }, err => console.error(err));
+        return unsub;
+      }, []);
+
+      const handleSaveBg = async (data) => {
+        await db.collection(SETTINGS_COL).doc("background").set(data);
+      };
+      const handleRemoveBg = async () => {
+        await db.collection(SETTINGS_COL).doc("background").delete();
+      };
 
       useEffect(() => {
         const unsub = db.collection(SERIES_COL)
@@ -1082,11 +1224,30 @@
         return {totalValue,byCat,topItem,total:items.length};
       }, [items, allCategories]);
 
+      const bgStyle = bgSettings?.image ? {
+        backgroundImage: `url(${bgSettings.image})`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundAttachment: "fixed",
+        filter: bgSettings.blur ? `blur(${bgSettings.blur}px)` : "none",
+      } : {};
+
       return (
-        <div style={{fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",background:"#FAFAFA",minHeight:"100vh",color:"#111"}}>
+        <div style={{fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",minHeight:"100vh",color:"#111",position:"relative"}}>
+
+          {/* Background layer */}
+          {bgSettings?.image && (
+            <div style={{position:"fixed",inset:0,zIndex:0,backgroundImage:`url(${bgSettings.image})`,backgroundSize:"cover",backgroundPosition:"center",filter:bgSettings.blur?`blur(${bgSettings.blur+4}px)`:"none",transform:"scale(1.05)"}}/>
+          )}
+          {bgSettings?.image && bgSettings.overlay > 0 && (
+            <div style={{position:"fixed",inset:0,zIndex:1,background:`rgba(0,0,0,${bgSettings.overlay})`}}/>
+          )}
+
+          {/* All content sits above background */}
+          <div style={{position:"relative",zIndex:2}}>
 
           {/* Header */}
-          <div style={{background:"#fff",borderBottom:"1px solid #F0F0F0",position:"sticky",top:0,zIndex:100}}>
+          <div style={{background:bgSettings?.image?"rgba(255,255,255,0.88)":"#fff",backdropFilter:bgSettings?.image?"blur(12px)":"none",borderBottom:"1px solid rgba(240,240,240,0.8)",position:"sticky",top:0,zIndex:100}}>
             <div style={{maxWidth:1200,margin:"0 auto",padding:"0 24px"}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",height:64}}>
                 <div style={{display:"flex",alignItems:"center",gap:12}}>
@@ -1102,6 +1263,9 @@
                   </button>
                   {isAdmin ? (
                     <>
+                      <button onClick={()=>setShowBgModal(true)} style={{background:"#F3F4F6",color:"#374151",border:"1.5px solid #E5E7EB",borderRadius:10,padding:"8px 14px",fontSize:13,fontWeight:600,cursor:"pointer"}} title="Change background">
+                        🖼️
+                      </button>
                       <button onClick={()=>setModal("add")} style={{background:"#111",color:"#fff",border:"none",borderRadius:10,padding:"9px 18px",fontSize:13,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
                         <span style={{fontSize:16}}>+</span> Add Item
                       </button>
@@ -1119,7 +1283,7 @@
             </div>
           </div>
 
-          <div style={{maxWidth:1200,margin:"0 auto",padding:"28px 24px"}}>
+          <div style={{maxWidth:1200,margin:"0 auto",padding:"28px 24px",background:bgSettings?.image?"transparent":undefined}}>
             {loading ? (
               <div style={{textAlign:"center",padding:"80px 20px",color:"#9CA3AF"}}>
                 <div style={{fontSize:40,marginBottom:12}} className="spinner">⏳</div>
@@ -1307,6 +1471,8 @@
           {modal && <Modal item={modal==="add"?null:modal} seriesList={seriesList} allCats={allCategories} subcategories={subcategories} onSave={handleSave} onClose={()=>setModal(null)}/>}
           {priceItem && <PriceTrackerModal item={priceItem} onClose={()=>setPriceItem(null)}/>}
           {showInsights && <InsightsModal items={items} seriesList={seriesList} allCats={allCategories} isAdmin={isAdmin} onClose={()=>setShowInsights(false)} onAddSeries={handleAddSeries} onDeleteSeries={handleDeleteSeries}/>}
+          {showBgModal && <BackgroundModal current={bgSettings} onSave={handleSaveBg} onRemove={handleRemoveBg} onClose={()=>setShowBgModal(false)}/>}
+          </div>{/* end content z-index wrapper */}
         </div>
       );
     }

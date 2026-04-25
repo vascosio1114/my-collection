@@ -550,6 +550,13 @@
     const CATEGORY_COLORS = { "NBA Card":"#E8522A","Pokemon Card":"#F5C518","Jersey":"#2563EB","Toy":"#16A34A","Other":"#9333EA" };
     const EXTRA_CAT_COLORS = ["#0EA5E9","#F97316","#A855F7","#14B8A6","#F43F5E","#84CC16","#8B5CF6","#06B6D4","#D97706","#BE185D"];
     const EXTRA_CAT_ICONS  = ["🎯","🎪","🎨","🎸","💎","🎲","🏅","🎭","👟","🎩","🪄","🏈","⚽","🎴","🖼️","📸"];
+    const PRICE_RANGES = [
+      { label:"全部價錢", value:"all",    min:0,    max:Infinity },
+      { label:"< $50",   value:"0-50",   min:0,    max:50       },
+      { label:"$50–$200",value:"50-200", min:50,   max:200      },
+      { label:"$200–$500",value:"200-500",min:200, max:500      },
+      { label:"$500+",   value:"500+",   min:500,  max:Infinity },
+    ];
 
     function formatCurrency(val) {
       return new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",maximumFractionDigits:0}).format(val);
@@ -908,15 +915,49 @@
 
     function ItemCard({ item, isAdmin, onEdit, onDelete, onPriceCheck }) {
       const catColor = CATEGORY_COLORS[item.category] || "#6B7280";
+      // Support both old single-image and new multi-image format
+      const images = item.images?.length ? item.images : (item.image ? [item.image] : []);
+      const [imgIdx, setImgIdx] = useState(0);
+      const safeIdx = Math.min(imgIdx, images.length - 1);
+
+      const prevImg = (e) => { e.stopPropagation(); setImgIdx(i => Math.max(0, i-1)); };
+      const nextImg = (e) => { e.stopPropagation(); setImgIdx(i => Math.min(images.length-1, i+1)); };
+
       return (
         <div style={{background:"#fff",borderRadius:16,border:"1px solid #F0F0F0",overflow:"hidden",boxShadow:"0 2px 12px rgba(0,0,0,0.05)",transition:"all 0.2s ease"}}
           onMouseEnter={e=>{e.currentTarget.style.boxShadow="0 8px 30px rgba(0,0,0,0.12)";e.currentTarget.style.transform="translateY(-3px)";}}
           onMouseLeave={e=>{e.currentTarget.style.boxShadow="0 2px 12px rgba(0,0,0,0.05)";e.currentTarget.style.transform="translateY(0)";}}>
-          <div style={{height:180,background:item.image?"transparent":`linear-gradient(135deg,${catColor}15,${catColor}30)`,display:"flex",alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden"}}>
-            {item.image
-              ? <img src={item.image} alt={item.name} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+          <div style={{height:180,background:images.length?"transparent":`linear-gradient(135deg,${catColor}15,${catColor}30)`,display:"flex",alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden"}}>
+            {images.length > 0
+              ? <img src={images[safeIdx]} alt={item.name} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
               : <span style={{fontSize:52,opacity:0.6}}>{CATEGORY_ICONS[item.category]||"📦"}</span>}
-            <div style={{position:"absolute",top:10,right:10,background:item.image?"rgba(0,0,0,0.55)":catColor,color:"#fff",borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>
+
+            {/* Carousel arrows */}
+            {images.length > 1 && (
+              <>
+                <button onClick={prevImg} disabled={safeIdx===0}
+                  style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",background:"rgba(0,0,0,0.45)",border:"none",borderRadius:"50%",width:28,height:28,color:"#fff",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",opacity:safeIdx===0?0.3:1,transition:"opacity 0.15s"}}>
+                  ‹
+                </button>
+                <button onClick={nextImg} disabled={safeIdx===images.length-1}
+                  style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",background:"rgba(0,0,0,0.45)",border:"none",borderRadius:"50%",width:28,height:28,color:"#fff",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",opacity:safeIdx===images.length-1?0.3:1,transition:"opacity 0.15s"}}>
+                  ›
+                </button>
+                {/* Counter */}
+                <div style={{position:"absolute",bottom:8,right:8,background:"rgba(0,0,0,0.55)",color:"#fff",borderRadius:10,padding:"2px 8px",fontSize:10,fontWeight:700}}>
+                  {safeIdx+1}/{images.length}
+                </div>
+                {/* Dots */}
+                <div style={{position:"absolute",bottom:8,left:"50%",transform:"translateX(-50%)",display:"flex",gap:4}}>
+                  {images.map((_,i)=>(
+                    <div key={i} onClick={e=>{e.stopPropagation();setImgIdx(i);}}
+                      style={{width:i===safeIdx?14:6,height:6,borderRadius:3,background:i===safeIdx?"#fff":"rgba(255,255,255,0.5)",transition:"all 0.2s",cursor:"pointer"}}/>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <div style={{position:"absolute",top:10,right:10,background:images.length?"rgba(0,0,0,0.55)":catColor,color:"#fff",borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>
               {item.category}
             </div>
           </div>
@@ -949,55 +990,103 @@
       );
     }
 
-    function ImageUploader({ value, onChange }) {
-      const inputRef = useRef(null);
-      const [dragging, setDragging] = useState(false);
-      const [compressing, setCompressing] = useState(false);
+    function MultiImageUploader({ values, onChange }) {
+      const inputRef   = useRef(null);
+      const [dragging, setDragging]   = useState(false);
+      const [compressing,setCompressing] = useState(false);
+      const MAX_PHOTOS = 8;
 
-      const processFile = useCallback(async (file) => {
-        if (!file || !file.type.startsWith("image/")) return;
+      const processFiles = useCallback(async (files) => {
+        const validFiles = Array.from(files).filter(f => f.type.startsWith("image/"));
+        if (!validFiles.length) return;
         setCompressing(true);
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-          const compressed = await compressImage(e.target.result);
-          onChange(compressed);
-          setCompressing(false);
-        };
-        reader.readAsDataURL(file);
-      }, [onChange]);
+        const results = [];
+        for (const file of validFiles) {
+          await new Promise(resolve => {
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+              const compressed = await compressImage(e.target.result);
+              results.push(compressed);
+              resolve();
+            };
+            reader.readAsDataURL(file);
+          });
+        }
+        onChange([...values, ...results].slice(0, MAX_PHOTOS));
+        setCompressing(false);
+      }, [values, onChange]);
+
+      const removeImage = (idx) => onChange(values.filter((_,i) => i !== idx));
+
+      const moveLeft  = (idx) => {
+        if (idx === 0) return;
+        const arr = [...values];
+        [arr[idx-1], arr[idx]] = [arr[idx], arr[idx-1]];
+        onChange(arr);
+      };
 
       return (
         <div style={{marginBottom:20}}>
-          <label style={{display:"block",fontSize:13,fontWeight:600,color:"#374151",marginBottom:8}}>Photo</label>
-          {value ? (
-            <div style={{position:"relative",borderRadius:12,overflow:"hidden",height:180,background:"#F3F4F6"}}>
-              <img src={value} alt="preview" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
-              <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0)",display:"flex",alignItems:"center",justifyContent:"center",gap:10,transition:"background 0.2s"}}
-                onMouseEnter={e=>e.currentTarget.style.background="rgba(0,0,0,0.45)"}
-                onMouseLeave={e=>e.currentTarget.style.background="rgba(0,0,0,0)"}>
-                <button onClick={()=>inputRef.current.click()} style={{background:"rgba(255,255,255,0.9)",border:"none",borderRadius:8,padding:"8px 16px",fontSize:12,fontWeight:700,cursor:"pointer",color:"#111"}}>Change</button>
-                <button onClick={()=>onChange(null)} style={{background:"rgba(220,38,38,0.85)",border:"none",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer",color:"#fff"}}>Remove</button>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+            <label style={{fontSize:13,fontWeight:600,color:"#374151"}}>Photos</label>
+            <span style={{fontSize:11,color:"#9CA3AF"}}>{values.length}/{MAX_PHOTOS} · 第一張為封面</span>
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+            {values.map((img, idx) => (
+              <div key={idx} style={{position:"relative",borderRadius:10,overflow:"hidden",aspectRatio:"1",background:"#F3F4F6"}}>
+                <img src={img} alt={`photo ${idx+1}`} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                {/* Cover badge */}
+                {idx === 0 && (
+                  <div style={{position:"absolute",top:5,left:5,background:"#111",color:"#fff",borderRadius:6,padding:"2px 7px",fontSize:10,fontWeight:700}}>封面</div>
+                )}
+                {/* Move to cover */}
+                {idx > 0 && (
+                  <button onClick={()=>moveLeft(idx)} title="Set as cover"
+                    style={{position:"absolute",top:5,left:5,background:"rgba(0,0,0,0.55)",border:"none",borderRadius:6,padding:"2px 7px",fontSize:10,color:"#fff",cursor:"pointer",fontWeight:600}}>
+                    ↑ 封面
+                  </button>
+                )}
+                {/* Remove */}
+                <button onClick={()=>removeImage(idx)}
+                  style={{position:"absolute",top:5,right:5,background:"rgba(220,38,38,0.8)",border:"none",borderRadius:6,width:22,height:22,cursor:"pointer",color:"#fff",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                  ✕
+                </button>
               </div>
-            </div>
-          ) : (
-            <div onClick={()=>inputRef.current.click()}
-              onDragOver={e=>{e.preventDefault();setDragging(true);}}
-              onDragLeave={()=>setDragging(false)}
-              onDrop={e=>{e.preventDefault();setDragging(false);processFile(e.dataTransfer.files[0]);}}
-              style={{border:`2px dashed ${dragging?"#111":"#D1D5DB"}`,borderRadius:12,height:140,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",background:dragging?"#F9F9F9":"#FAFAFA",gap:8}}>
-              {compressing
-                ? <><span style={{fontSize:24}}>⏳</span><div style={{fontSize:13,color:"#9CA3AF"}}>Compressing…</div></>
-                : <><span style={{fontSize:32}}>🖼️</span><div style={{fontSize:13,fontWeight:600,color:"#374151"}}>Click to upload or drag & drop</div><div style={{fontSize:11,color:"#9CA3AF"}}>JPG, PNG, WEBP</div></>
-              }
-            </div>
-          )}
-          <input ref={inputRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>processFile(e.target.files[0])}/>
+            ))}
+
+            {/* Add more tile */}
+            {values.length < MAX_PHOTOS && (
+              <div onClick={()=>!compressing&&inputRef.current.click()}
+                onDragOver={e=>{e.preventDefault();setDragging(true);}}
+                onDragLeave={()=>setDragging(false)}
+                onDrop={e=>{e.preventDefault();setDragging(false);processFiles(e.dataTransfer.files);}}
+                style={{aspectRatio:"1",border:`2px dashed ${dragging?"#111":"#D1D5DB"}`,borderRadius:10,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",background:dragging?"#F0F0F0":"#FAFAFA",gap:6}}>
+                {compressing
+                  ? <><span style={{fontSize:20}} className="spinner">⏳</span><div style={{fontSize:11,color:"#9CA3AF"}}>壓縮中…</div></>
+                  : <><span style={{fontSize:24}}>+</span><div style={{fontSize:11,fontWeight:600,color:"#6B7280"}}>新增相片</div></>
+                }
+              </div>
+            )}
+          </div>
+          <input ref={inputRef} type="file" accept="image/*" multiple style={{display:"none"}}
+            onChange={e=>{processFiles(e.target.files);e.target.value="";}}/>
         </div>
       );
     }
 
     function Modal({ item, seriesList, allCats, subcategories, onSave, onClose }) {
-      const [form, setForm] = useState(item || {name:"",category:"NBA Card",condition:"Near Mint",value:"",year:new Date().getFullYear(),notes:"",image:null,series:"",subcategory:""});
+      // Normalise images: support both old `image` (string) and new `images` (array)
+      const initImages = item
+        ? (item.images?.length ? item.images : (item.image ? [item.image] : []))
+        : [];
+      const [form, setForm] = useState({
+        name:"", category:"NBA Card", condition:"Near Mint",
+        value:"", year:new Date().getFullYear(), notes:"",
+        series:"", subcategory:"",
+        ...(item||{}),
+        images: initImages,
+      });
       const [saving, setSaving] = useState(false);
       const handleChange = (k,v) => setForm(f=>({...f,[k]:v}));
 
@@ -1013,7 +1102,9 @@
       const handleSave = async () => {
         if (!form.name || !form.value) return alert("Please fill in name and value.");
         setSaving(true);
-        await onSave({...form, value:parseFloat(form.value), year:parseInt(form.year)||new Date().getFullYear()});
+        // Save images array; remove legacy image field to keep doc clean
+        const { image: _legacy, ...rest } = form;
+        await onSave({...rest, value:parseFloat(form.value), year:parseInt(form.year)||new Date().getFullYear()});
         setSaving(false);
       };
 
@@ -1024,7 +1115,7 @@
               <h2 style={{margin:0,fontSize:20,fontWeight:800,color:"#111"}}>{item&&item.id?"Edit Item":"Add New Item"}</h2>
               <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:8,width:32,height:32,cursor:"pointer",fontSize:16,color:"#6B7280"}}>✕</button>
             </div>
-            <ImageUploader value={form.image} onChange={v=>handleChange("image",v)}/>
+            <MultiImageUploader values={form.images||[]} onChange={v=>handleChange("images",v)}/>
             {[{label:"Item Name",key:"name",type:"text",placeholder:"e.g. Kobe Bryant RC"},
               {label:"Year",key:"year",type:"number",placeholder:"e.g. 1996"},
               {label:"Value (USD)",key:"value",type:"number",placeholder:"e.g. 500"},
@@ -1105,6 +1196,7 @@
       const [showBgModal,  setShowBgModal]  = useState(false);
       const [selectedCat,  setSelectedCat]  = useState("All");
       const [selectedSubcat,setSelectedSubcat]= useState("All");
+      const [selectedPriceRange, setSelectedPriceRange] = useState("all");
       const [search,       setSearch]       = useState("");
       const [sortBy,       setSortBy]       = useState("dateAdded");
       const [sortDir,      setSortDir]      = useState("desc");
@@ -1192,8 +1284,8 @@
         await db.collection(SUBCATS_COL).doc(id).delete();
       };
 
-      // When category changes, reset subcategory filter
-      useEffect(() => { setSelectedSubcat("All"); }, [selectedCat]);
+      // When category changes, reset subcategory and price range filters
+      useEffect(() => { setSelectedSubcat("All"); setSelectedPriceRange("all"); }, [selectedCat]);
 
       // Subcats for the currently selected category
       const currentSubcats = useMemo(() =>
@@ -1230,6 +1322,10 @@
         let arr = items;
         if (selectedCat !== "All") arr = arr.filter(i=>i.category===selectedCat);
         if (selectedSubcat !== "All") arr = arr.filter(i=>i.subcategory===selectedSubcat);
+        if (selectedPriceRange !== "all") {
+          const range = PRICE_RANGES.find(r => r.value === selectedPriceRange);
+          if (range) arr = arr.filter(i => (i.value||0) >= range.min && (i.value||0) < range.max);
+        }
         if (search.trim()) {
           const s = search.toLowerCase();
           arr = arr.filter(i=>i.name.toLowerCase().includes(s)||(i.notes&&i.notes.toLowerCase().includes(s))||String(i.year).includes(s));
@@ -1241,7 +1337,7 @@
           if (va>vb) return sortDir==="asc"?1:-1;
           return 0;
         });
-      }, [items,selectedCat,selectedSubcat,search,sortBy,sortDir]);
+      }, [items,selectedCat,selectedSubcat,selectedPriceRange,search,sortBy,sortDir]);
 
       const stats = useMemo(() => {
         const totalValue = items.reduce((s,i)=>s+i.value,0);
@@ -1439,6 +1535,20 @@
                   </div>
                 )}
 
+                {/* Price range pills — always visible */}
+                <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap",alignItems:"center",paddingLeft:4}}>
+                  <span style={{fontSize:11,fontWeight:600,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:0.5,marginRight:4}}>💰</span>
+                  {PRICE_RANGES.map(r => {
+                    const active = selectedPriceRange === r.value;
+                    return (
+                      <button key={r.value} onClick={()=>setSelectedPriceRange(r.value)}
+                        style={{padding:"4px 14px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",border:active?"2px solid #10B981":"1.5px solid #E5E7EB",background:active?"#10B981":"#fff",color:active?"#fff":"#6B7280",transition:"all 0.15s"}}>
+                        {r.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
                 <div style={{fontSize:13,color:"#9CA3AF",marginBottom:16,fontWeight:500}}>
                   Showing {filtered.length} of {items.length} items
                   {filtered.length>0&&<span style={{marginLeft:12,color:"#374151",fontWeight:700}}>Total: {formatCurrency(filtered.reduce((s,i)=>s+i.value,0))}</span>}
@@ -1470,7 +1580,7 @@
                         onMouseEnter={e=>e.currentTarget.style.boxShadow="0 4px 16px rgba(0,0,0,0.08)"}
                         onMouseLeave={e=>e.currentTarget.style.boxShadow="none"}>
                         <div style={{width:44,height:44,borderRadius:8,overflow:"hidden",background:`linear-gradient(135deg,${(CATEGORY_COLORS[item.category]||"#999")+"25"},${(CATEGORY_COLORS[item.category]||"#999")+"45"})`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                          {item.image?<img src={item.image} alt={item.name} style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span style={{fontSize:20}}>{CATEGORY_ICONS[item.category]||"📦"}</span>}
+                          {(item.images?.[0]||item.image)?<img src={item.images?.[0]||item.image} alt={item.name} style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span style={{fontSize:20}}>{CATEGORY_ICONS[item.category]||"📦"}</span>}
                         </div>
                         <div>
                           <div style={{fontWeight:700,color:"#111",marginBottom:2}}>{item.name}</div>

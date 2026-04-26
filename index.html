@@ -558,6 +558,13 @@
       { label:"$500+",   value:"500+",   min:500,  max:Infinity },
     ];
 
+    const PRESET_SUBCATS = {
+      "NBA Card":     ["Panini Prizm","Panini Optic","Panini Select","Hoops","Rookie Card (RC)","Autograph","Patch / Relic","Graded (PSA/BGS)"],
+      "Pokemon Card": ["Base Set","151 Series","Scarlet & Violet","舊卡 (Vintage)","EX / GX / V"],
+      "Jersey":       ["簽名球衣","未簽名球衣","限量版","比賽用品"],
+      "Toy":          ["Funko Pop","限定版","LEGO"],
+    };
+
     function formatCurrency(val) {
       return new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",maximumFractionDigits:0}).format(val);
     }
@@ -759,112 +766,194 @@
       );
     }
 
-    // ── Manage Categories Modal ────────────────────────────────
-    function ManageCategoriesModal({ customCats, onClose, onAdd, onDelete }) {
-      const [name,    setName]    = useState("");
-      const [icon,    setIcon]    = useState("🎯");
-      const [adding,  setAdding]  = useState(false);
+    // ── Manage Categories Modal (full settings panel) ──────────
+    function ManageCategoriesModal({ customCats, subcategories, onClose, onAdd, onDelete, onAddSubcat, onDeleteSubcat }) {
+      const [view,         setView]         = useState("list");
+      const [expandedCat,  setExpandedCat]  = useState(null);
+      const [subcatInputs, setSubcatInputs] = useState({});
+      const [saving,       setSaving]       = useState({});
+      const [newName,      setNewName]      = useState("");
+      const [newIcon,      setNewIcon]      = useState("🎯");
+      const [addingCat,    setAddingCat]    = useState(false);
 
       const ICON_OPTIONS = ["🎯","🎪","🎨","🎸","💎","🎲","🏅","🎭","👟","🎩","🪄","🏈","⚽","🎴","🖼️","📸","🚗","🎵","🧸","🪆"];
       const nextColor = EXTRA_CAT_COLORS[customCats.length % EXTRA_CAT_COLORS.length];
 
-      const handleAdd = async () => {
-        if (!name.trim()) return;
-        const trimmed = name.trim();
-        if (DEFAULT_CATS.includes(trimmed) || customCats.some(c=>c.name===trimmed)) {
-          alert("That category already exists!"); return;
-        }
-        setAdding(true);
-        await onAdd({ name: trimmed, icon, color: nextColor, createdAt: Date.now() });
-        setName(""); setAdding(false);
+      const allCats = [
+        ...DEFAULT_CATS.map(n=>({ name:n, isDefault:true, icon:CATEGORY_ICONS[n]||"📦", color:CATEGORY_COLORS[n]||"#9CA3AF" })),
+        ...customCats.map(c=>({ ...c, isDefault:false }))
+      ];
+
+      const getSubcats = (catName) => subcategories.filter(s=>s.category===catName);
+
+      const handleAddSubcat = async (catName) => {
+        const val = (subcatInputs[catName]||"").trim();
+        if (!val) return;
+        setSaving(p=>({...p,[catName]:true}));
+        await onAddSubcat({ category:catName, name:val, createdAt:Date.now() });
+        setSubcatInputs(p=>({...p,[catName]:""}));
+        setSaving(p=>({...p,[catName]:false}));
+      };
+
+      const handleSeedPresets = async (catName) => {
+        const presets  = PRESET_SUBCATS[catName]||[];
+        const existing = getSubcats(catName).map(s=>s.name);
+        const toAdd    = presets.filter(p=>!existing.includes(p));
+        setSaving(p=>({...p,[catName+"_seed"]:true}));
+        for (const n of toAdd) await onAddSubcat({ category:catName, name:n, createdAt:Date.now() });
+        setSaving(p=>({...p,[catName+"_seed"]:false}));
+      };
+
+      const handleAddCat = async () => {
+        if (!newName.trim()) return;
+        const trimmed = newName.trim();
+        if (DEFAULT_CATS.includes(trimmed)||customCats.some(c=>c.name===trimmed)) { alert("That category already exists!"); return; }
+        setAddingCat(true);
+        await onAdd({ name:trimmed, icon:newIcon, color:nextColor, createdAt:Date.now() });
+        setNewName(""); setAddingCat(false); setView("list");
       };
 
       return (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",backdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:20}}>
-          <div style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:520,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}}>
+          <div style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:560,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}}>
 
             {/* Header */}
-            <div style={{padding:"24px 28px 0",display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
+            <div style={{padding:"24px 28px 0",display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:22}}>⚙️</span>
-                <span style={{fontSize:18,fontWeight:800,color:"#111"}}>Manage Categories</span>
+                <span style={{fontSize:18,fontWeight:800,color:"#111"}}>Category Settings</span>
               </div>
               <button onClick={onClose} style={{background:"#F3F4F6",border:"none",borderRadius:8,width:32,height:32,cursor:"pointer",fontSize:16,color:"#6B7280"}}>✕</button>
             </div>
 
+            {/* Tabs */}
+            <div style={{padding:"0 28px",display:"flex",gap:8,marginBottom:20}}>
+              {[["list","All Categories"],["addCat","+ New Category"]].map(([v,label])=>(
+                <button key={v} onClick={()=>setView(v)}
+                  style={{padding:"7px 16px",borderRadius:20,fontSize:13,fontWeight:700,border:view===v?"2px solid #111":"1.5px solid #E5E7EB",background:view===v?"#111":"#fff",color:view===v?"#fff":"#6B7280",cursor:"pointer"}}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
             <div style={{padding:"0 28px 28px"}}>
 
-              {/* Add new category form */}
-              <div style={{background:"#F8F8F8",borderRadius:14,padding:18,marginBottom:24}}>
-                <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:14,textTransform:"uppercase",letterSpacing:0.5}}>+ Add New Category</div>
+              {/* ── LIST VIEW ── */}
+              {view==="list" && (
+                <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  {allCats.map(cat=>{
+                    const subs        = getSubcats(cat.name);
+                    const presets     = PRESET_SUBCATS[cat.name]||[];
+                    const unseeded    = presets.filter(p=>!subs.map(s=>s.name).includes(p)).length;
+                    const isExpanded  = expandedCat===cat.name;
 
-                {/* Name input */}
-                <div style={{marginBottom:12}}>
-                  <label style={{fontSize:12,fontWeight:600,color:"#6B7280",display:"block",marginBottom:6}}>Category Name</label>
-                  <input value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleAdd()} placeholder="e.g. Sneakers, Comics…"
-                    style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1.5px solid #E5E7EB",fontSize:14,outline:"none",boxSizing:"border-box"}}
-                    onFocus={e=>e.target.style.borderColor="#111"} onBlur={e=>e.target.style.borderColor="#E5E7EB"}/>
-                </div>
+                    return (
+                      <div key={cat.name} style={{border:"1.5px solid #E5E7EB",borderRadius:14,overflow:"hidden"}}>
 
-                {/* Icon picker */}
-                <div style={{marginBottom:14}}>
-                  <label style={{fontSize:12,fontWeight:600,color:"#6B7280",display:"block",marginBottom:8}}>Icon</label>
-                  <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-                    {ICON_OPTIONS.map(ic=>(
-                      <button key={ic} onClick={()=>setIcon(ic)} style={{width:36,height:36,fontSize:18,border:icon===ic?"2px solid #111":"1.5px solid #E5E7EB",borderRadius:8,cursor:"pointer",background:icon===ic?"#111":"#fff",transition:"all 0.15s"}}>
-                        {ic}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Color preview */}
-                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
-                  <div style={{width:20,height:20,borderRadius:"50%",background:nextColor,border:"2px solid #fff",boxShadow:"0 0 0 1.5px #E5E7EB"}}/>
-                  <span style={{fontSize:12,color:"#6B7280"}}>Auto-assigned colour</span>
-                </div>
-
-                <button onClick={handleAdd} disabled={adding||!name.trim()}
-                  style={{width:"100%",padding:"10px",background:"#111",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:adding||!name.trim()?"not-allowed":"pointer",opacity:adding||!name.trim()?0.5:1}}>
-                  {adding?"Adding…":"Add Category"}
-                </button>
-              </div>
-
-              {/* Default categories (locked) */}
-              <div style={{fontSize:12,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>Default Categories</div>
-              <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
-                {DEFAULT_CATS.map(c=>(
-                  <div key={c} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",background:"#F8F8F8",borderRadius:10,border:"1px solid #F0F0F0"}}>
-                    <div style={{display:"flex",alignItems:"center",gap:10}}>
-                      <span style={{fontSize:18}}>{CATEGORY_ICONS[c]||"📦"}</span>
-                      <span style={{fontSize:14,fontWeight:600,color:"#374151"}}>{c}</span>
-                    </div>
-                    <span style={{fontSize:11,color:"#9CA3AF",background:"#F3F4F6",padding:"2px 10px",borderRadius:20}}>default</span>
-                  </div>
-                ))}
-              </div>
-
-              {/* Custom categories */}
-              {customCats.length > 0 && (
-                <>
-                  <div style={{fontSize:12,fontWeight:700,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>Custom Categories</div>
-                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                    {customCats.map(c=>(
-                      <div key={c.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",background:"#fff",borderRadius:10,border:"1px solid #F0F0F0",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
-                        <div style={{display:"flex",alignItems:"center",gap:10}}>
-                          <div style={{width:28,height:28,borderRadius:8,background:c.color,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15}}>{c.icon}</div>
-                          <span style={{fontSize:14,fontWeight:600,color:"#111"}}>{c.name}</span>
+                        {/* Category row header */}
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:isExpanded?"#F8F8F8":"#fff",cursor:"pointer"}}
+                          onClick={()=>setExpandedCat(isExpanded?null:cat.name)}>
+                          <div style={{display:"flex",alignItems:"center",gap:10}}>
+                            <div style={{width:34,height:34,borderRadius:9,background:cat.color,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>
+                              {cat.icon}
+                            </div>
+                            <div>
+                              <div style={{fontSize:14,fontWeight:700,color:"#111"}}>{cat.name}</div>
+                              <div style={{fontSize:11,color:"#9CA3AF"}}>{subs.length} subcategory{subs.length!==1?"s":""}{cat.isDefault?"":" · custom"}</div>
+                            </div>
+                          </div>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            {unseeded>0&&<span style={{fontSize:10,padding:"2px 8px",borderRadius:20,background:"#EAF3DE",color:"#3B6D11",fontWeight:700}}>+{unseeded} suggested</span>}
+                            {!cat.isDefault&&(
+                              <button onClick={e=>{e.stopPropagation();onDelete(cat.id,cat.name);}}
+                                style={{background:"#FEF2F2",border:"none",borderRadius:8,padding:"4px 10px",fontSize:12,color:"#DC2626",cursor:"pointer",fontWeight:700}}>
+                                Delete
+                              </button>
+                            )}
+                            <span style={{fontSize:14,color:"#9CA3AF",display:"inline-block",transform:isExpanded?"rotate(180deg)":"rotate(0deg)",transition:"transform 0.2s"}}>▾</span>
+                          </div>
                         </div>
-                        <button onClick={()=>onDelete(c.id, c.name)} style={{background:"#FEF2F2",border:"none",borderRadius:8,padding:"5px 10px",fontSize:12,color:"#DC2626",cursor:"pointer",fontWeight:600}}>Delete</button>
+
+                        {/* Expanded panel */}
+                        {isExpanded&&(
+                          <div style={{padding:"16px",borderTop:"1px solid #F0F0F0",background:"#FAFAFA"}}>
+
+                            {/* Seed presets button */}
+                            {unseeded>0&&(
+                              <button onClick={()=>handleSeedPresets(cat.name)} disabled={!!saving[cat.name+"_seed"]}
+                                style={{width:"100%",padding:"9px",marginBottom:14,background:"#EAF3DE",color:"#3B6D11",border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",opacity:saving[cat.name+"_seed"]?0.6:1}}>
+                                {saving[cat.name+"_seed"]?"Adding…":`✦ Add ${unseeded} recommended subcategories`}
+                              </button>
+                            )}
+
+                            {/* Existing subcategory pills */}
+                            {subs.length>0?(
+                              <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}}>
+                                {subs.map(s=>(
+                                  <div key={s.id} style={{display:"flex",alignItems:"center",gap:3,padding:"4px 10px",borderRadius:20,background:"#fff",border:"1.5px solid #E5E7EB",fontSize:12,fontWeight:600,color:"#374151"}}>
+                                    {s.name}
+                                    <button onClick={()=>onDeleteSubcat(s.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#9CA3AF",fontSize:11,padding:"0 0 0 3px",lineHeight:1}}>✕</button>
+                                  </div>
+                                ))}
+                              </div>
+                            ):(
+                              <div style={{fontSize:12,color:"#9CA3AF",textAlign:"center",padding:"8px 0",marginBottom:12}}>No subcategories yet</div>
+                            )}
+
+                            {/* Add subcat input */}
+                            <div style={{display:"flex",gap:8}}>
+                              <input
+                                value={subcatInputs[cat.name]||""}
+                                onChange={e=>setSubcatInputs(p=>({...p,[cat.name]:e.target.value}))}
+                                onKeyDown={e=>e.key==="Enter"&&handleAddSubcat(cat.name)}
+                                placeholder="Add subcategory…"
+                                style={{flex:1,padding:"8px 12px",borderRadius:10,border:"1.5px solid #E5E7EB",fontSize:13,outline:"none",background:"#fff"}}
+                                onFocus={e=>e.target.style.borderColor="#111"}
+                                onBlur={e=>e.target.style.borderColor="#E5E7EB"}
+                              />
+                              <button onClick={()=>handleAddSubcat(cat.name)} disabled={!!saving[cat.name]||!(subcatInputs[cat.name]||"").trim()}
+                                style={{padding:"8px 16px",background:"#111",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",opacity:saving[cat.name]||!(subcatInputs[cat.name]||"").trim()?0.4:1}}>
+                                Add
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    ))}
-                  </div>
-                </>
+                    );
+                  })}
+                </div>
               )}
 
-              {customCats.length === 0 && (
-                <div style={{textAlign:"center",padding:"20px 0",color:"#9CA3AF",fontSize:13}}>No custom categories yet — add one above!</div>
+              {/* ── ADD CATEGORY VIEW ── */}
+              {view==="addCat"&&(
+                <div style={{background:"#F8F8F8",borderRadius:14,padding:20}}>
+                  <div style={{marginBottom:14}}>
+                    <label style={{fontSize:12,fontWeight:700,color:"#374151",display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:0.5}}>Category Name</label>
+                    <input value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleAddCat()} placeholder="e.g. Sneakers, Comics…"
+                      style={{width:"100%",padding:"10px 14px",borderRadius:10,border:"1.5px solid #E5E7EB",fontSize:14,outline:"none",boxSizing:"border-box",background:"#fff"}}
+                      onFocus={e=>e.target.style.borderColor="#111"} onBlur={e=>e.target.style.borderColor="#E5E7EB"}/>
+                  </div>
+                  <div style={{marginBottom:16}}>
+                    <label style={{fontSize:12,fontWeight:700,color:"#374151",display:"block",marginBottom:8,textTransform:"uppercase",letterSpacing:0.5}}>Icon</label>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                      {ICON_OPTIONS.map(ic=>(
+                        <button key={ic} onClick={()=>setNewIcon(ic)} style={{width:36,height:36,fontSize:18,border:newIcon===ic?"2px solid #111":"1.5px solid #E5E7EB",borderRadius:8,cursor:"pointer",background:newIcon===ic?"#111":"#fff",transition:"all 0.15s"}}>
+                          {ic}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18}}>
+                    <div style={{width:20,height:20,borderRadius:"50%",background:nextColor,border:"2px solid #fff",boxShadow:"0 0 0 1.5px #E5E7EB"}}/>
+                    <span style={{fontSize:12,color:"#6B7280"}}>Auto-assigned colour</span>
+                  </div>
+                  <button onClick={handleAddCat} disabled={addingCat||!newName.trim()}
+                    style={{width:"100%",padding:"10px",background:"#111",color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:addingCat||!newName.trim()?"not-allowed":"pointer",opacity:addingCat||!newName.trim()?0.5:1}}>
+                    {addingCat?"Creating…":"Create Category"}
+                  </button>
+                </div>
               )}
+
             </div>
           </div>
         </div>
@@ -1607,7 +1696,7 @@
           </div>
 
           {showPwModal && <PasswordModal onSuccess={()=>{setIsAdmin(true);setShowPwModal(false);}} onClose={()=>setShowPwModal(false)}/>}
-          {showCatModal && <ManageCategoriesModal customCats={customCats} onClose={()=>setShowCatModal(false)} onAdd={handleAddCat} onDelete={handleDeleteCat}/>}
+          {showCatModal && <ManageCategoriesModal customCats={customCats} subcategories={subcategories} onClose={()=>setShowCatModal(false)} onAdd={handleAddCat} onDelete={handleDeleteCat} onAddSubcat={handleAddSubcat} onDeleteSubcat={handleDeleteSubcat}/>}
           {modal && <Modal item={modal==="add"?null:modal} seriesList={seriesList} allCats={allCategories} subcategories={subcategories} onSave={handleSave} onClose={()=>setModal(null)}/>}
           {priceItem && <PriceTrackerModal item={priceItem} onClose={()=>setPriceItem(null)}/>}
           {showInsights && <InsightsModal items={items} seriesList={seriesList} allCats={allCategories} isAdmin={isAdmin} onClose={()=>setShowInsights(false)} onAddSeries={handleAddSeries} onDeleteSeries={handleDeleteSeries}/>}

@@ -43,10 +43,11 @@
 
     const app = firebase.initializeApp(FIREBASE_CONFIG);
     const db  = firebase.firestore();
-    const ITEMS_COL    = "items";
-    const SERIES_COL   = "series";
-    const SUBCATS_COL  = "subcategories";
-    const SETTINGS_COL = "settings";
+    const ITEMS_COL       = "items";
+    const SERIES_COL      = "series";
+    const SUBCATS_COL     = "subcategories";
+    const SUBSUBCATS_COL  = "subsubcategories";
+    const SETTINGS_COL    = "settings";
 
     // ── eBay JSONP Search ──────────────────────────────────────
     function searchEbaySold(keywords) {
@@ -767,11 +768,13 @@
     }
 
     // ── Manage Categories Modal (full settings panel) ──────────
-    function ManageCategoriesModal({ customCats, subcategories, onClose, onAdd, onDelete, onAddSubcat, onDeleteSubcat }) {
-      const [view,         setView]         = useState("list");
-      const [expandedCat,  setExpandedCat]  = useState(null);
-      const [subcatInputs, setSubcatInputs] = useState({});
-      const [saving,       setSaving]       = useState({});
+    function ManageCategoriesModal({ customCats, subcategories, subsubcategories, onClose, onAdd, onDelete, onAddSubcat, onDeleteSubcat, onAddSubSubcat, onDeleteSubSubcat }) {
+      const [view,            setView]           = useState("list");
+      const [expandedCat,     setExpandedCat]    = useState(null);
+      const [expandedSubcat,  setExpandedSubcat] = useState(null);
+      const [subcatInputs,    setSubcatInputs]   = useState({});
+      const [subsubInputs,    setSubsubInputs]   = useState({});
+      const [saving,          setSaving]         = useState({});
       const [newName,      setNewName]      = useState("");
       const [newIcon,      setNewIcon]      = useState("🎯");
       const [addingCat,    setAddingCat]    = useState(false);
@@ -784,7 +787,8 @@
         ...customCats.map(c=>({ ...c, isDefault:false }))
       ];
 
-      const getSubcats = (catName) => subcategories.filter(s=>s.category===catName);
+      const getSubcats    = (catName) => subcategories.filter(s=>s.category===catName);
+      const getSubSubcats = (catName, subcatName) => (subsubcategories||[]).filter(s=>s.category===catName && s.subcategory===subcatName);
 
       const handleAddSubcat = async (catName) => {
         const val = (subcatInputs[catName]||"").trim();
@@ -802,6 +806,16 @@
         setSaving(p=>({...p,[catName+"_seed"]:true}));
         for (const n of toAdd) await onAddSubcat({ category:catName, name:n, createdAt:Date.now() });
         setSaving(p=>({...p,[catName+"_seed"]:false}));
+      };
+
+      const handleAddSubSubcatModal = async (catName, subcatName) => {
+        const key = catName+"||"+subcatName;
+        const val = (subsubInputs[key]||"").trim();
+        if (!val) return;
+        setSaving(p=>({...p,[key]:true}));
+        await onAddSubSubcat({ category:catName, subcategory:subcatName, name:val, createdAt:Date.now() });
+        setSubsubInputs(p=>({...p,[key]:""}));
+        setSaving(p=>({...p,[key]:false}));
       };
 
       const handleAddCat = async () => {
@@ -886,15 +900,58 @@
                               </button>
                             )}
 
-                            {/* Existing subcategory pills */}
+                            {/* Subcategories as expandable rows */}
                             {subs.length>0?(
-                              <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}}>
-                                {subs.map(s=>(
-                                  <div key={s.id} style={{display:"flex",alignItems:"center",gap:3,padding:"4px 10px",borderRadius:20,background:"#fff",border:"1.5px solid #E5E7EB",fontSize:12,fontWeight:600,color:"#374151"}}>
-                                    {s.name}
-                                    <button onClick={()=>onDeleteSubcat(s.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#9CA3AF",fontSize:11,padding:"0 0 0 3px",lineHeight:1}}>✕</button>
-                                  </div>
-                                ))}
+                              <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
+                                {subs.map(s=>{
+                                  const subkey = cat.name+"||"+s.name;
+                                  const subSubList = getSubSubcats(cat.name, s.name);
+                                  const isSubExpanded = expandedSubcat===subkey;
+                                  return (
+                                    <div key={s.id} style={{border:"1px solid #E5E7EB",borderRadius:10,overflow:"hidden",background:"#fff"}}>
+                                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",cursor:"pointer",background:isSubExpanded?"#F3F4F6":"#fff"}}
+                                        onClick={()=>setExpandedSubcat(isSubExpanded?null:subkey)}>
+                                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                          <span style={{fontSize:13,fontWeight:600,color:"#374151"}}>{s.name}</span>
+                                          {subSubList.length>0&&<span style={{fontSize:10,padding:"1px 7px",borderRadius:20,background:"#EDE9FE",color:"#6D28D9",fontWeight:700}}>{subSubList.length}</span>}
+                                        </div>
+                                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                                          <button onClick={e=>{e.stopPropagation();onDeleteSubcat(s.id);}} style={{background:"none",border:"none",cursor:"pointer",color:"#9CA3AF",fontSize:12,padding:"2px 4px"}}>✕</button>
+                                          <span style={{fontSize:12,color:"#9CA3AF",display:"inline-block",transform:isSubExpanded?"rotate(180deg)":"rotate(0)",transition:"0.2s"}}>▾</span>
+                                        </div>
+                                      </div>
+                                      {isSubExpanded&&(
+                                        <div style={{padding:"10px 12px",borderTop:"1px solid #F0F0F0",background:"#FAFAFA"}}>
+                                          {subSubList.length>0&&(
+                                            <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:10}}>
+                                              {subSubList.map(ss=>(
+                                                <div key={ss.id} style={{display:"flex",alignItems:"center",gap:2,padding:"3px 9px",borderRadius:20,background:"#EDE9FE",border:"none",fontSize:11,fontWeight:600,color:"#6D28D9"}}>
+                                                  {ss.name}
+                                                  <button onClick={()=>onDeleteSubSubcat(ss.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#A78BFA",fontSize:10,padding:"0 0 0 3px",lineHeight:1}}>✕</button>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                          <div style={{display:"flex",gap:6}}>
+                                            <input
+                                              value={subsubInputs[subkey]||""}
+                                              onChange={e=>setSubsubInputs(p=>({...p,[subkey]:e.target.value}))}
+                                              onKeyDown={e=>e.key==="Enter"&&handleAddSubSubcatModal(cat.name,s.name)}
+                                              placeholder="Add grade/type… (e.g. PSA 10)"
+                                              style={{flex:1,padding:"6px 10px",borderRadius:8,border:"1.5px solid #E5E7EB",fontSize:12,outline:"none",background:"#fff"}}
+                                              onFocus={e=>e.target.style.borderColor="#7C3AED"}
+                                              onBlur={e=>e.target.style.borderColor="#E5E7EB"}
+                                            />
+                                            <button onClick={()=>handleAddSubSubcatModal(cat.name,s.name)} disabled={!!saving[subkey]||!(subsubInputs[subkey]||"").trim()}
+                                              style={{padding:"6px 12px",background:"#7C3AED",color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:700,cursor:"pointer",opacity:saving[subkey]||!(subsubInputs[subkey]||"").trim()?0.4:1}}>
+                                              Add
+                                            </button>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             ):(
                               <div style={{fontSize:12,color:"#9CA3AF",textAlign:"center",padding:"8px 0",marginBottom:12}}>No subcategories yet</div>
@@ -1056,11 +1113,18 @@
               <ConditionBadge condition={item.condition}/>
               <span style={{fontSize:12,color:"#9CA3AF"}}>{item.year}</span>
             </div>
-            {item.subcategory && (
-              <div style={{marginBottom:8}}>
-                <span style={{background:catColor+"18",color:catColor,borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>
-                  {item.subcategory}
-                </span>
+            {(item.subcategory || item.subsubcategory) && (
+              <div style={{marginBottom:8,display:"flex",flexWrap:"wrap",gap:5}}>
+                {item.subcategory && (
+                  <span style={{background:catColor+"18",color:catColor,borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>
+                    {item.subcategory}
+                  </span>
+                )}
+                {item.subsubcategory && (
+                  <span style={{background:"#F3F4F6",color:"#374151",borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>
+                    {item.subsubcategory}
+                  </span>
+                )}
               </div>
             )}
             {item.notes && <div style={{fontSize:12,color:"#6B7280",marginBottom:10,fontStyle:"italic"}}>{item.notes}</div>}
@@ -1164,7 +1228,7 @@
       );
     }
 
-    function Modal({ item, seriesList, allCats, subcategories, onSave, onClose }) {
+    function Modal({ item, seriesList, allCats, subcategories, subsubcategories, onSave, onClose }) {
       // Normalise images: support both old `image` (string) and new `images` (array)
       const initImages = item
         ? (item.images?.length ? item.images : (item.image ? [item.image] : []))
@@ -1172,20 +1236,28 @@
       const [form, setForm] = useState({
         name:"", category:"NBA Card", condition:"Near Mint",
         value:"", year:new Date().getFullYear(), notes:"",
-        series:"", subcategory:"",
+        series:"", subcategory:"", subsubcategory:"",
         ...(item||{}),
         images: initImages,
       });
       const [saving, setSaving] = useState(false);
       const handleChange = (k,v) => setForm(f=>({...f,[k]:v}));
 
-      // Reset subcategory when category changes
-      const handleCatChange = (v) => setForm(f=>({...f, category:v, subcategory:""}));
+      // Reset subcategory + sub-subcategory when category changes
+      const handleCatChange = (v) => setForm(f=>({...f, category:v, subcategory:"", subsubcategory:""}));
+      // Reset sub-subcategory when subcategory changes
+      const handleSubcatChange = (v) => setForm(f=>({...f, subcategory:v, subsubcategory:""}));
 
       // Subcats available for the currently selected category
       const availableSubcats = useMemo(() =>
         (subcategories||[]).filter(s => s.category === form.category),
         [subcategories, form.category]
+      );
+
+      // Sub-subcats available for the currently selected subcategory
+      const availableSubSubcats = useMemo(() =>
+        form.subcategory ? (subsubcategories||[]).filter(s => s.category===form.category && s.subcategory===form.subcategory) : [],
+        [subsubcategories, form.category, form.subcategory]
       );
 
       const handleSave = async () => {
@@ -1232,13 +1304,32 @@
                   Subcategory <span style={{fontWeight:400,color:"#9CA3AF"}}>(optional)</span>
                 </label>
                 <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-                  <button type="button" onClick={()=>handleChange("subcategory","")}
+                  <button type="button" onClick={()=>handleSubcatChange("")}
                     style={{padding:"6px 14px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",border:!form.subcategory?"2px solid #111":"1.5px solid #E5E7EB",background:!form.subcategory?"#111":"#fff",color:!form.subcategory?"#fff":"#6B7280"}}>
                     None
                   </button>
                   {availableSubcats.map(s=>(
-                    <button key={s.id} type="button" onClick={()=>handleChange("subcategory",s.name)}
+                    <button key={s.id} type="button" onClick={()=>handleSubcatChange(s.name)}
                       style={{padding:"6px 14px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",border:form.subcategory===s.name?"2px solid #111":"1.5px solid #E5E7EB",background:form.subcategory===s.name?"#111":"#fff",color:form.subcategory===s.name?"#fff":"#6B7280"}}>
+                      {s.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {availableSubSubcats.length > 0 && (
+              <div style={{marginBottom:16,paddingLeft:12,borderLeft:"3px solid #E5E7EB"}}>
+                <label style={{display:"block",fontSize:13,fontWeight:600,color:"#374151",marginBottom:6}}>
+                  Grade / Type <span style={{fontWeight:400,color:"#9CA3AF"}}>(optional)</span>
+                </label>
+                <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                  <button type="button" onClick={()=>handleChange("subsubcategory","")}
+                    style={{padding:"5px 12px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",border:!form.subsubcategory?"2px solid #374151":"1.5px solid #E5E7EB",background:!form.subsubcategory?"#374151":"#fff",color:!form.subsubcategory?"#fff":"#6B7280"}}>
+                    None
+                  </button>
+                  {availableSubSubcats.map(s=>(
+                    <button key={s.id} type="button" onClick={()=>handleChange("subsubcategory",s.name)}
+                      style={{padding:"5px 12px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",border:form.subsubcategory===s.name?"2px solid #374151":"1.5px solid #E5E7EB",background:form.subsubcategory===s.name?"#374151":"#fff",color:form.subsubcategory===s.name?"#fff":"#6B7280"}}>
                       {s.name}
                     </button>
                   ))}
@@ -1275,17 +1366,19 @@
       const [items,        setItems]        = useState([]);
       const [seriesList,   setSeriesList]   = useState([]);
       const [customCats,   setCustomCats]   = useState([]);
-      const [subcategories,setSubcategories]= useState([]);
-      const [bgSettings,   setBgSettings]   = useState(null);
+      const [subcategories,   setSubcategories]   = useState([]);
+      const [subsubcategories,setSubsubcategories] = useState([]);
+      const [bgSettings,      setBgSettings]      = useState(null);
       const [loading,      setLoading]      = useState(true);
       const [isAdmin,      setIsAdmin]      = useState(false);
       const [showPwModal,  setShowPwModal]  = useState(false);
       const [showInsights, setShowInsights] = useState(false);
       const [showCatModal, setShowCatModal] = useState(false);
       const [showBgModal,  setShowBgModal]  = useState(false);
-      const [selectedCat,  setSelectedCat]  = useState("All");
-      const [selectedSubcat,setSelectedSubcat]= useState("All");
-      const [selectedPriceRange, setSelectedPriceRange] = useState("all");
+      const [selectedCat,       setSelectedCat]       = useState("All");
+      const [selectedSubcat,    setSelectedSubcat]    = useState("All");
+      const [selectedSubSubcat, setSelectedSubSubcat] = useState("All");
+      const [selectedPriceRange,setSelectedPriceRange]= useState("all");
       const [search,       setSearch]       = useState("");
       const [sortBy,       setSortBy]       = useState("dateAdded");
       const [sortDir,      setSortDir]      = useState("desc");
@@ -1373,13 +1466,40 @@
         await db.collection(SUBCATS_COL).doc(id).delete();
       };
 
+      useEffect(() => {
+        const unsub = db.collection(SUBSUBCATS_COL)
+          .orderBy("createdAt","asc")
+          .onSnapshot(snap => {
+            setSubsubcategories(snap.docs.map(d=>({id:d.id,...d.data()})));
+          }, err => console.error(err));
+        return unsub;
+      }, []);
+
+      const handleAddSubSubcat = async (data) => {
+        await db.collection(SUBSUBCATS_COL).add(data);
+      };
+      const handleDeleteSubSubcat = async (id) => {
+        await db.collection(SUBSUBCATS_COL).doc(id).delete();
+      };
+
       // When category changes, reset subcategory and price range filters
-      useEffect(() => { setSelectedSubcat("All"); setSelectedPriceRange("all"); }, [selectedCat]);
+      useEffect(() => { setSelectedSubcat("All"); setSelectedSubSubcat("All"); setSelectedPriceRange("all"); }, [selectedCat]);
+
+      // When subcategory changes, reset sub-subcategory filter
+      useEffect(() => { setSelectedSubSubcat("All"); }, [selectedSubcat]);
 
       // Subcats for the currently selected category
       const currentSubcats = useMemo(() =>
         subcategories.filter(s => s.category === selectedCat),
         [subcategories, selectedCat]
+      );
+
+      // Sub-subcats for the currently selected category + subcategory
+      const currentSubSubcats = useMemo(() =>
+        selectedSubcat !== "All"
+          ? subsubcategories.filter(s => s.category===selectedCat && s.subcategory===selectedSubcat)
+          : [],
+        [subsubcategories, selectedCat, selectedSubcat]
       );
 
       const handleAddSeries = async (data) => {
@@ -1411,6 +1531,7 @@
         let arr = items;
         if (selectedCat !== "All") arr = arr.filter(i=>i.category===selectedCat);
         if (selectedSubcat !== "All") arr = arr.filter(i=>i.subcategory===selectedSubcat);
+        if (selectedSubSubcat !== "All") arr = arr.filter(i=>i.subsubcategory===selectedSubSubcat);
         if (selectedPriceRange !== "all") {
           const range = PRICE_RANGES.find(r => r.value === selectedPriceRange);
           if (range) arr = arr.filter(i => (i.value||0) >= range.min && (i.value||0) < range.max);
@@ -1426,7 +1547,7 @@
           if (va>vb) return sortDir==="asc"?1:-1;
           return 0;
         });
-      }, [items,selectedCat,selectedSubcat,selectedPriceRange,search,sortBy,sortDir]);
+      }, [items,selectedCat,selectedSubcat,selectedSubSubcat,selectedPriceRange,search,sortBy,sortDir]);
 
       const stats = useMemo(() => {
         const totalValue = items.reduce((s,i)=>s+i.value,0);
@@ -1624,6 +1745,34 @@
                   </div>
                 )}
 
+                {/* Sub-subcategory pills — shown when a subcategory with sub-subcats is selected */}
+                {selectedSubcat !== "All" && currentSubSubcats.length > 0 && (
+                  <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap",alignItems:"center",paddingLeft:20}}>
+                    <span style={{fontSize:11,fontWeight:600,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:0.5,marginRight:4}}>↳</span>
+                    <button onClick={()=>setSelectedSubSubcat("All")}
+                      style={{padding:"4px 14px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",border:selectedSubSubcat==="All"?"2px solid #6B7280":"1.5px solid #E5E7EB",background:selectedSubSubcat==="All"?"#6B7280":"#fff",color:selectedSubSubcat==="All"?"#fff":"#6B7280"}}>
+                      All
+                    </button>
+                    {currentSubSubcats.map(s=>{
+                      const active = selectedSubSubcat === s.name;
+                      return (
+                        <div key={s.id} style={{display:"flex",alignItems:"center",gap:0,borderRadius:20,border:active?"2px solid #374151":"1.5px solid #E5E7EB",background:active?"#374151":"#fff",overflow:"hidden"}}>
+                          <button onClick={()=>setSelectedSubSubcat(active?"All":s.name)}
+                            style={{padding:"4px 12px",fontSize:12,fontWeight:600,cursor:"pointer",border:"none",background:"transparent",color:active?"#fff":"#6B7280"}}>
+                            {s.name}
+                          </button>
+                          {isAdmin && (
+                            <button onClick={()=>handleDeleteSubSubcat(s.id)}
+                              style={{padding:"4px 8px 4px 0",fontSize:10,border:"none",background:"transparent",color:active?"rgba(255,255,255,0.7)":"#9CA3AF",cursor:"pointer",lineHeight:1}}>
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
                 {/* Price range pills — always visible */}
                 <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap",alignItems:"center",paddingLeft:4}}>
                   <span style={{fontSize:11,fontWeight:600,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:0.5,marginRight:4}}>💰</span>
@@ -1696,8 +1845,8 @@
           </div>
 
           {showPwModal && <PasswordModal onSuccess={()=>{setIsAdmin(true);setShowPwModal(false);}} onClose={()=>setShowPwModal(false)}/>}
-          {showCatModal && <ManageCategoriesModal customCats={customCats} subcategories={subcategories} onClose={()=>setShowCatModal(false)} onAdd={handleAddCat} onDelete={handleDeleteCat} onAddSubcat={handleAddSubcat} onDeleteSubcat={handleDeleteSubcat}/>}
-          {modal && <Modal item={modal==="add"?null:modal} seriesList={seriesList} allCats={allCategories} subcategories={subcategories} onSave={handleSave} onClose={()=>setModal(null)}/>}
+          {showCatModal && <ManageCategoriesModal customCats={customCats} subcategories={subcategories} subsubcategories={subsubcategories} onClose={()=>setShowCatModal(false)} onAdd={handleAddCat} onDelete={handleDeleteCat} onAddSubcat={handleAddSubcat} onDeleteSubcat={handleDeleteSubcat} onAddSubSubcat={handleAddSubSubcat} onDeleteSubSubcat={handleDeleteSubSubcat}/>}
+          {modal && <Modal item={modal==="add"?null:modal} seriesList={seriesList} allCats={allCategories} subcategories={subcategories} subsubcategories={subsubcategories} onSave={handleSave} onClose={()=>setModal(null)}/>}
           {priceItem && <PriceTrackerModal item={priceItem} onClose={()=>setPriceItem(null)}/>}
           {showInsights && <InsightsModal items={items} seriesList={seriesList} allCats={allCategories} isAdmin={isAdmin} onClose={()=>setShowInsights(false)} onAddSeries={handleAddSeries} onDeleteSeries={handleDeleteSeries}/>}
           {showBgModal && <BackgroundModal current={bgSettings} onSave={handleSaveBg} onRemove={handleRemoveBg} onClose={()=>setShowBgModal(false)}/>}

@@ -15,7 +15,7 @@
       appId:             "1:379661358660:web:58b2f4b0a313cf3c458e11"
     };
     // 改呢度設定你嘅 Admin 密碼
-    const ADMIN_PASSWORD = "vascosio1114";
+    const ADMIN_PASSWORD = "vasco2025";
     // eBay App ID
     const EBAY_APP_ID = "KeiChonS-mycollec-PRD-b40ce5f68-2dc8555f";
   </script>
@@ -566,6 +566,38 @@
       "Toy":          ["Funko Pop","限定版","LEGO"],
     };
 
+    // Sub-subcategory presets — key is "Category||Subcategory" (case-insensitive match on subcategory)
+    const PSA_GRADES = ["PSA 10","PSA 9","PSA 8","PSA 7","PSA 6","BGS 9.5","BGS 9","Other"];
+    const PRESET_SUBSUBCATS = {
+      // NBA Card — graded
+      "NBA Card||Graded (PSA/BGS)":    PSA_GRADES,
+      "NBA Card||PSA card":            PSA_GRADES,
+      "NBA Card||PSA Card":            PSA_GRADES,
+      "NBA Card||graded":              PSA_GRADES,
+      "NBA Card||Graded":              PSA_GRADES,
+      // NBA Card — other
+      "NBA Card||Autograph":           ["On-Card Auto","Sticker Auto"],
+      "NBA Card||Patch / Relic":       ["1/1","Logoman","Nameplate","Jersey Patch"],
+      // Pokemon Card — graded
+      "Pokemon Card||PSA card":        PSA_GRADES,
+      "Pokemon Card||PSA Card":        PSA_GRADES,
+      "Pokemon Card||Graded (PSA/BGS)":PSA_GRADES,
+      "Pokemon Card||graded":          PSA_GRADES,
+      "Pokemon Card||Graded":          PSA_GRADES,
+    };
+    // Helper: look up preset sub-subcats — case-insensitive subcategory match
+    function getPresetSubSubcats(catName, subcatName) {
+      const exact = catName+"||"+subcatName;
+      if (PRESET_SUBSUBCATS[exact]) return PRESET_SUBSUBCATS[exact];
+      // Try case-insensitive match on subcategory name
+      const lc = subcatName.toLowerCase();
+      const found = Object.keys(PRESET_SUBSUBCATS).find(k => {
+        const [kCat, kSub] = k.split("||");
+        return kCat===catName && kSub.toLowerCase()===lc;
+      });
+      return found ? PRESET_SUBSUBCATS[found] : [];
+    }
+
     function formatCurrency(val) {
       return new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",maximumFractionDigits:0}).format(val);
     }
@@ -920,8 +952,22 @@
                                           <span style={{fontSize:12,color:"#9CA3AF",display:"inline-block",transform:isSubExpanded?"rotate(180deg)":"rotate(0)",transition:"0.2s"}}>▾</span>
                                         </div>
                                       </div>
-                                      {isSubExpanded&&(
+                                      {isSubExpanded&&(()=>{
+                                        const subsubPresets = getPresetSubSubcats(cat.name, s.name);
+                                        const existingSSNames = subSubList.map(ss=>ss.name);
+                                        const unseededSS = subsubPresets.filter(p=>!existingSSNames.includes(p));
+                                        return (
                                         <div style={{padding:"10px 12px",borderTop:"1px solid #F0F0F0",background:"#FAFAFA"}}>
+                                          {unseededSS.length>0&&(
+                                            <button onClick={async()=>{
+                                              setSaving(p=>({...p,[subkey+"_seed"]:true}));
+                                              for(const n of unseededSS) await onAddSubSubcat({category:cat.name,subcategory:s.name,name:n,createdAt:Date.now()});
+                                              setSaving(p=>({...p,[subkey+"_seed"]:false}));
+                                            }} disabled={!!saving[subkey+"_seed"]}
+                                              style={{width:"100%",padding:"7px",marginBottom:10,background:"#EDE9FE",color:"#6D28D9",border:"none",borderRadius:8,fontSize:12,fontWeight:700,cursor:"pointer",opacity:saving[subkey+"_seed"]?0.6:1}}>
+                                              {saving[subkey+"_seed"]?"Adding…":`✦ Add ${unseededSS.length} suggested grades`}
+                                            </button>
+                                          )}
                                           {subSubList.length>0&&(
                                             <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:10}}>
                                               {subSubList.map(ss=>(
@@ -948,7 +994,8 @@
                                             </button>
                                           </div>
                                         </div>
-                                      )}
+                                        );
+                                      })()}
                                     </div>
                                   );
                                 })}
@@ -1113,7 +1160,7 @@
               <ConditionBadge condition={item.condition}/>
               <span style={{fontSize:12,color:"#9CA3AF"}}>{item.year}</span>
             </div>
-            {(item.subcategory || item.subsubcategory) && (
+            {(item.subcategory || item.subsubcategory || item.language) && (
               <div style={{marginBottom:8,display:"flex",flexWrap:"wrap",gap:5}}>
                 {item.subcategory && (
                   <span style={{background:catColor+"18",color:catColor,borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>
@@ -1121,8 +1168,13 @@
                   </span>
                 )}
                 {item.subsubcategory && (
-                  <span style={{background:"#F3F4F6",color:"#374151",borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>
+                  <span style={{background:"#EDE9FE",color:"#6D28D9",borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>
                     {item.subsubcategory}
+                  </span>
+                )}
+                {item.language && (
+                  <span style={{background:"#E0F2FE",color:"#0369A1",borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700}}>
+                    {item.language}
                   </span>
                 )}
               </div>
@@ -1236,7 +1288,7 @@
       const [form, setForm] = useState({
         name:"", category:"NBA Card", condition:"Near Mint",
         value:"", year:new Date().getFullYear(), notes:"",
-        series:"", subcategory:"", subsubcategory:"",
+        series:"", subcategory:"", subsubcategory:"", language:"",
         ...(item||{}),
         images: initImages,
       });
@@ -1254,11 +1306,14 @@
         [subcategories, form.category]
       );
 
-      // Sub-subcats available for the currently selected subcategory
-      const availableSubSubcats = useMemo(() =>
-        form.subcategory ? (subsubcategories||[]).filter(s => s.category===form.category && s.subcategory===form.subcategory) : [],
-        [subsubcategories, form.category, form.subcategory]
-      );
+      // Sub-subcats: use Firestore data if available, otherwise fall back to built-in presets
+      const availableSubSubcats = useMemo(() => {
+        if (!form.subcategory) return [];
+        const fromDB = (subsubcategories||[]).filter(s => s.category===form.category && s.subcategory===form.subcategory);
+        if (fromDB.length > 0) return fromDB;
+        // Fall back to presets so grade picker always shows for known subcats
+        return getPresetSubSubcats(form.category, form.subcategory).map((name, i) => ({ id:"preset_"+i, name }));
+      }, [subsubcategories, form.category, form.subcategory]);
 
       const handleSave = async () => {
         if (!form.name || !form.value) return alert("Please fill in name and value.");
@@ -1337,6 +1392,19 @@
               </div>
             )}
             <div style={{marginBottom:16}}>
+              <label style={{display:"block",fontSize:13,fontWeight:600,color:"#374151",marginBottom:6}}>
+                Language <span style={{fontWeight:400,color:"#9CA3AF"}}>(optional)</span>
+              </label>
+              <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                {["","英文版","日文版","中文版","韓文版"].map(lang=>(
+                  <button key={lang} type="button" onClick={()=>handleChange("language",lang)}
+                    style={{padding:"6px 14px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",border:form.language===lang?"2px solid #0EA5E9":"1.5px solid #E5E7EB",background:form.language===lang?"#0EA5E9":"#fff",color:form.language===lang?"#fff":"#6B7280"}}>
+                    {lang===""?"未設定":lang}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{marginBottom:16}}>
               <label style={{display:"block",fontSize:13,fontWeight:600,color:"#374151",marginBottom:6}}>Condition</label>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                 {CONDITIONS.map(c=>(
@@ -1376,9 +1444,19 @@
       const [showCatModal, setShowCatModal] = useState(false);
       const [showBgModal,  setShowBgModal]  = useState(false);
       const [selectedCat,       setSelectedCat]       = useState("All");
-      const [selectedSubcat,    setSelectedSubcat]    = useState("All");
+      const [selectedSubcats,   setSelectedSubcats]   = useState(new Set());
       const [selectedSubSubcat, setSelectedSubSubcat] = useState("All");
+      const [selectedLanguage,  setSelectedLanguage]  = useState("All");
       const [selectedPriceRange,setSelectedPriceRange]= useState("all");
+
+      const toggleSubcat = (name) => {
+        setSelectedSubcats(prev => {
+          const next = new Set(prev);
+          if (next.has(name)) next.delete(name); else next.add(name);
+          return next;
+        });
+        setSelectedSubSubcat("All");
+      };
       const [search,       setSearch]       = useState("");
       const [sortBy,       setSortBy]       = useState("dateAdded");
       const [sortDir,      setSortDir]      = useState("desc");
@@ -1482,11 +1560,8 @@
         await db.collection(SUBSUBCATS_COL).doc(id).delete();
       };
 
-      // When category changes, reset subcategory and price range filters
-      useEffect(() => { setSelectedSubcat("All"); setSelectedSubSubcat("All"); setSelectedPriceRange("all"); }, [selectedCat]);
-
-      // When subcategory changes, reset sub-subcategory filter
-      useEffect(() => { setSelectedSubSubcat("All"); }, [selectedSubcat]);
+      // When category changes, reset all sub-filters
+      useEffect(() => { setSelectedSubcats(new Set()); setSelectedSubSubcat("All"); setSelectedLanguage("All"); setSelectedPriceRange("all"); }, [selectedCat]);
 
       // Subcats for the currently selected category
       const currentSubcats = useMemo(() =>
@@ -1494,13 +1569,12 @@
         [subcategories, selectedCat]
       );
 
-      // Sub-subcats for the currently selected category + subcategory
-      const currentSubSubcats = useMemo(() =>
-        selectedSubcat !== "All"
-          ? subsubcategories.filter(s => s.category===selectedCat && s.subcategory===selectedSubcat)
-          : [],
-        [subsubcategories, selectedCat, selectedSubcat]
-      );
+      // Sub-subcats shown only when exactly 1 subcat is selected
+      const currentSubSubcats = useMemo(() => {
+        if (selectedSubcats.size !== 1) return [];
+        const only = [...selectedSubcats][0];
+        return subsubcategories.filter(s => s.category===selectedCat && s.subcategory===only);
+      }, [subsubcategories, selectedCat, selectedSubcats]);
 
       const handleAddSeries = async (data) => {
         await db.collection(SERIES_COL).add(data);
@@ -1530,8 +1604,9 @@
       const filtered = useMemo(() => {
         let arr = items;
         if (selectedCat !== "All") arr = arr.filter(i=>i.category===selectedCat);
-        if (selectedSubcat !== "All") arr = arr.filter(i=>i.subcategory===selectedSubcat);
+        if (selectedSubcats.size > 0) arr = arr.filter(i=>selectedSubcats.has(i.subcategory));
         if (selectedSubSubcat !== "All") arr = arr.filter(i=>i.subsubcategory===selectedSubSubcat);
+        if (selectedLanguage !== "All") arr = arr.filter(i=>(i.language||"")===selectedLanguage);
         if (selectedPriceRange !== "all") {
           const range = PRICE_RANGES.find(r => r.value === selectedPriceRange);
           if (range) arr = arr.filter(i => (i.value||0) >= range.min && (i.value||0) < range.max);
@@ -1547,7 +1622,7 @@
           if (va>vb) return sortDir==="asc"?1:-1;
           return 0;
         });
-      }, [items,selectedCat,selectedSubcat,selectedSubSubcat,selectedPriceRange,search,sortBy,sortDir]);
+      }, [items,selectedCat,selectedSubcats,selectedSubSubcat,selectedLanguage,selectedPriceRange,search,sortBy,sortDir]);
 
       const stats = useMemo(() => {
         const totalValue = items.reduce((s,i)=>s+i.value,0);
@@ -1715,20 +1790,20 @@
                   )}
                 </div>
 
-                {/* Subcategory pills — shown when a category with subcats is selected */}
+                {/* Subcategory pills — multi-select */}
                 {selectedCat !== "All" && (currentSubcats.length > 0 || isAdmin) && (
                   <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap",alignItems:"center",paddingLeft:4}}>
                     <span style={{fontSize:11,fontWeight:600,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:0.5,marginRight:4}}>↳</span>
-                    <button onClick={()=>setSelectedSubcat("All")}
-                      style={{padding:"4px 14px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",border:selectedSubcat==="All"?"2px solid #374151":"1.5px solid #E5E7EB",background:selectedSubcat==="All"?"#374151":"#fff",color:selectedSubcat==="All"?"#fff":"#6B7280"}}>
+                    <button onClick={()=>setSelectedSubcats(new Set())}
+                      style={{padding:"4px 14px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",border:selectedSubcats.size===0?"2px solid #374151":"1.5px solid #E5E7EB",background:selectedSubcats.size===0?"#374151":"#fff",color:selectedSubcats.size===0?"#fff":"#6B7280"}}>
                       All
                     </button>
                     {currentSubcats.map(s => {
-                      const active = selectedSubcat === s.name;
+                      const active = selectedSubcats.has(s.name);
                       const col = CATEGORY_COLORS[selectedCat] || "#374151";
                       return (
                         <div key={s.id} style={{display:"flex",alignItems:"center",gap:0,borderRadius:20,border:active?`2px solid ${col}`:"1.5px solid #E5E7EB",background:active?col:"#fff",overflow:"hidden"}}>
-                          <button onClick={()=>setSelectedSubcat(active?"All":s.name)}
+                          <button onClick={()=>toggleSubcat(s.name)}
                             style={{padding:"4px 12px",fontSize:12,fontWeight:600,cursor:"pointer",border:"none",background:"transparent",color:active?"#fff":"#6B7280"}}>
                             {s.name}
                           </button>
@@ -1741,12 +1816,17 @@
                         </div>
                       );
                     })}
+                    {selectedSubcats.size > 0 && (
+                      <span style={{fontSize:11,color:"#6B7280",padding:"4px 8px",background:"#F3F4F6",borderRadius:20}}>
+                        {selectedSubcats.size} selected
+                      </span>
+                    )}
                     {isAdmin && <SubcatAdder category={selectedCat} onAdd={handleAddSubcat}/>}
                   </div>
                 )}
 
-                {/* Sub-subcategory pills — shown when a subcategory with sub-subcats is selected */}
-                {selectedSubcat !== "All" && currentSubSubcats.length > 0 && (
+                {/* Sub-subcategory pills — shown when exactly 1 subcat selected and has sub-subcats */}
+                {selectedSubcats.size === 1 && currentSubSubcats.length > 0 && (
                   <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap",alignItems:"center",paddingLeft:20}}>
                     <span style={{fontSize:11,fontWeight:600,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:0.5,marginRight:4}}>↳</span>
                     <button onClick={()=>setSelectedSubSubcat("All")}
@@ -1772,6 +1852,20 @@
                     })}
                   </div>
                 )}
+
+                {/* Language filter pills */}
+                <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap",alignItems:"center",paddingLeft:4}}>
+                  <span style={{fontSize:11,fontWeight:600,color:"#9CA3AF",textTransform:"uppercase",letterSpacing:0.5,marginRight:4}}>🌐</span>
+                  {["All","英文版","日文版","中文版","韓文版"].map(lang=>{
+                    const active = selectedLanguage===lang;
+                    return (
+                      <button key={lang} onClick={()=>setSelectedLanguage(lang)}
+                        style={{padding:"4px 14px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",border:active?"2px solid #0EA5E9":"1.5px solid #E5E7EB",background:active?"#0EA5E9":"#fff",color:active?"#fff":"#6B7280",transition:"all 0.15s"}}>
+                        {lang==="All"?"全部語言":lang}
+                      </button>
+                    );
+                  })}
+                </div>
 
                 {/* Price range pills — always visible */}
                 <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap",alignItems:"center",paddingLeft:4}}>

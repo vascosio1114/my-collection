@@ -1064,6 +1064,58 @@
       );
     }
 
+    // ── Login Gate (full-page, shown when not authenticated) ──
+    function LoginGate({ onSuccess, bgSettings }) {
+      const [pw,    setPw]    = useState("");
+      const [error, setError] = useState(false);
+      const [shake, setShake] = useState(false);
+      const inputRef = useRef(null);
+      useEffect(() => { inputRef.current?.focus(); }, []);
+
+      const handleSubmit = () => {
+        if (pw === ADMIN_PASSWORD) {
+          onSuccess();
+        } else {
+          setError(true); setShake(true); setPw("");
+          setTimeout(() => { setError(false); setShake(false); }, 1500);
+        }
+      };
+
+      return (
+        <div style={{position:"relative",zIndex:2,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{
+            background: bgSettings?.image ? "rgba(255,255,255,0.88)" : "#fff",
+            backdropFilter: bgSettings?.image ? "blur(20px)" : "none",
+            borderRadius:28, padding:"44px 40px", width:"100%", maxWidth:400,
+            boxShadow:"0 32px 100px rgba(0,0,0,0.22)", textAlign:"center",
+            transform: shake ? "translateX(0)" : "none",
+            animation: shake ? "shake 0.4s ease" : "none",
+          }}>
+            <style>{`@keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}`}</style>
+            <div style={{width:68,height:68,background:"#111",borderRadius:20,display:"flex",alignItems:"center",justifyContent:"center",fontSize:30,margin:"0 auto 20px"}}>🏆</div>
+            <div style={{fontSize:22,fontWeight:800,color:"#111",marginBottom:6,letterSpacing:-0.5}}>Vasco's Collection Vault</div>
+            <div style={{fontSize:13,color:"#9CA3AF",marginBottom:32}}>Enter password to access the collection</div>
+            <input
+              ref={inputRef}
+              type="password"
+              value={pw}
+              onChange={e=>setPw(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&handleSubmit()}
+              placeholder="Password"
+              style={{width:"100%",padding:"13px 16px",borderRadius:14,border:error?"2px solid #EF4444":"1.5px solid #E5E7EB",fontSize:15,outline:"none",marginBottom:14,textAlign:"center",background:error?"#FEF2F2":"#F9F9F9",boxSizing:"border-box",transition:"all 0.2s",color:"#111"}}
+            />
+            <button onClick={handleSubmit}
+              style={{width:"100%",padding:"13px",background:"#111",color:"#fff",border:"none",borderRadius:14,fontSize:15,fontWeight:700,cursor:"pointer",letterSpacing:0.2}}>
+              Enter Collection →
+            </button>
+            {error && (
+              <div style={{marginTop:14,fontSize:13,color:"#EF4444",fontWeight:600}}>Incorrect password — try again</div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
     function PasswordModal({ onSuccess, onClose }) {
       const [pw, setPw] = useState("");
       const [error, setError] = useState(false);
@@ -1654,7 +1706,10 @@
             <div style={{position:"fixed",inset:0,zIndex:1,background:`rgba(0,0,0,${bgSettings.overlay})`}}/>
           )}
 
-          {/* All content sits above background */}
+          {/* Gate: show login screen if not authenticated */}
+          {!isAdmin ? (
+            <LoginGate bgSettings={bgSettings} onSuccess={()=>setIsAdmin(true)}/>
+          ) : (
           <div style={{position:"relative",zIndex:2}}>
 
           {/* Header */}
@@ -1945,6 +2000,7 @@
           {showInsights && <InsightsModal items={items} seriesList={seriesList} allCats={allCategories} isAdmin={isAdmin} onClose={()=>setShowInsights(false)} onAddSeries={handleAddSeries} onDeleteSeries={handleDeleteSeries}/>}
           {showBgModal && <BackgroundModal current={bgSettings} onSave={handleSaveBg} onRemove={handleRemoveBg} onClose={()=>setShowBgModal(false)}/>}
           </div>{/* end content z-index wrapper */}
+          )}{/* end isAdmin gate */}
         </div>
       );
     }

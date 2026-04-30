@@ -928,7 +928,7 @@
                             {unseeded>0&&(
                               <button onClick={()=>handleSeedPresets(cat.name)} disabled={!!saving[cat.name+"_seed"]}
                                 style={{width:"100%",padding:"9px",marginBottom:14,background:"#EAF3DE",color:"#3B6D11",border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",opacity:saving[cat.name+"_seed"]?0.6:1}}>
-                                {saving[cat.name+"_seed"]?"Adding…":`✦ Add ${unseeded} recommended subcategories`}
+                                {saving[cat.name+"_seed"] ? "Adding…" : ("Add " + unseeded + " recommended subcategories")}
                               </button>
                             )}
 
@@ -936,9 +936,12 @@
                             {subs.length>0?(
                               <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
                                 {subs.map(s=>{
-                                  const subkey = cat.name+"||"+s.name;
-                                  const subSubList = getSubSubcats(cat.name, s.name);
+                                  const subkey        = cat.name+"||"+s.name;
+                                  const subSubList    = getSubSubcats(cat.name, s.name);
                                   const isSubExpanded = expandedSubcat===subkey;
+                                  const subsubPresets = getPresetSubSubcats(cat.name, s.name);
+                                  const existingSSNames = subSubList.map(ss=>ss.name);
+                                  const unseededSS    = subsubPresets.filter(p=>!existingSSNames.includes(p));
                                   return (
                                     <div key={s.id} style={{border:"1px solid #E5E7EB",borderRadius:10,overflow:"hidden",background:"#fff"}}>
                                       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",cursor:"pointer",background:isSubExpanded?"#F3F4F6":"#fff"}}
@@ -952,23 +955,19 @@
                                           <span style={{fontSize:12,color:"#9CA3AF",display:"inline-block",transform:isSubExpanded?"rotate(180deg)":"rotate(0)",transition:"0.2s"}}>▾</span>
                                         </div>
                                       </div>
-                                      {isSubExpanded&&(()=>{
-                                        const subsubPresets = getPresetSubSubcats(cat.name, s.name);
-                                        const existingSSNames = subSubList.map(ss=>ss.name);
-                                        const unseededSS = subsubPresets.filter(p=>!existingSSNames.includes(p));
-                                        return (
+                                      {isSubExpanded && (
                                         <div style={{padding:"10px 12px",borderTop:"1px solid #F0F0F0",background:"#FAFAFA"}}>
-                                          {unseededSS.length>0&&(
-                                            <button onClick={async()=>{
+                                          {unseededSS.length>0 && (
+                                            <button onClick={()=>{
                                               setSaving(p=>({...p,[subkey+"_seed"]:true}));
-                                              for(const n of unseededSS) await onAddSubSubcat({category:cat.name,subcategory:s.name,name:n,createdAt:Date.now()});
-                                              setSaving(p=>({...p,[subkey+"_seed"]:false}));
+                                              Promise.all(unseededSS.map(n=>onAddSubSubcat({category:cat.name,subcategory:s.name,name:n,createdAt:Date.now()})))
+                                                .then(()=>setSaving(p=>({...p,[subkey+"_seed"]:false})));
                                             }} disabled={!!saving[subkey+"_seed"]}
                                               style={{width:"100%",padding:"7px",marginBottom:10,background:"#EDE9FE",color:"#6D28D9",border:"none",borderRadius:8,fontSize:12,fontWeight:700,cursor:"pointer",opacity:saving[subkey+"_seed"]?0.6:1}}>
-                                              {saving[subkey+"_seed"]?"Adding…":`✦ Add ${unseededSS.length} suggested grades`}
+                                              {saving[subkey+"_seed"] ? "Adding…" : ("Add " + unseededSS.length + " suggested grades")}
                                             </button>
                                           )}
-                                          {subSubList.length>0&&(
+                                          {subSubList.length>0 && (
                                             <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:10}}>
                                               {subSubList.map(ss=>(
                                                 <div key={ss.id} style={{display:"flex",alignItems:"center",gap:2,padding:"3px 9px",borderRadius:20,background:"#EDE9FE",border:"none",fontSize:11,fontWeight:600,color:"#6D28D9"}}>
@@ -983,7 +982,7 @@
                                               value={subsubInputs[subkey]||""}
                                               onChange={e=>setSubsubInputs(p=>({...p,[subkey]:e.target.value}))}
                                               onKeyDown={e=>e.key==="Enter"&&handleAddSubSubcatModal(cat.name,s.name)}
-                                              placeholder="Add grade/type… (e.g. PSA 10)"
+                                              placeholder="Add grade/type…"
                                               style={{flex:1,padding:"6px 10px",borderRadius:8,border:"1.5px solid #E5E7EB",fontSize:12,outline:"none",background:"#fff"}}
                                               onFocus={e=>e.target.style.borderColor="#7C3AED"}
                                               onBlur={e=>e.target.style.borderColor="#E5E7EB"}
@@ -994,8 +993,7 @@
                                             </button>
                                           </div>
                                         </div>
-                                        );
-                                      })()}
+                                      )}
                                     </div>
                                   );
                                 })}

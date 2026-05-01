@@ -37,9 +37,38 @@
 </head>
 <body>
   <div id="root"></div>
+  <div id="err-display" style="display:none;position:fixed;inset:0;background:#fff;z-index:9999;padding:40px;font-family:monospace;font-size:13px;overflow:auto;white-space:pre-wrap;color:#c00"></div>
+  <script>
+    window.onerror = function(msg, src, line, col, err) {
+      var d = document.getElementById('err-display');
+      d.style.display = 'block';
+      d.textContent = 'JS ERROR:\n' + msg + '\n\nLine: ' + line + '\n' + (err ? err.stack : '');
+    };
+  </script>
 
-  <script type="text/babel">
-    const { useState, useMemo, useRef, useCallback, useEffect } = React;
+  <script type="text/babel" data-presets="env,react">
+    const { useState, useMemo, useRef, useCallback, useEffect, Component } = React;
+
+    // Error boundary to catch React render errors visually
+    class ErrorBoundary extends Component {
+      constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null };
+      }
+      static getDerivedStateFromError(error) {
+        return { hasError: true, error };
+      }
+      render() {
+        if (this.state.hasError) {
+          return (
+            <div style={{position:"fixed",inset:0,background:"#fff",zIndex:9999,padding:40,fontFamily:"monospace",fontSize:13,color:"#c00",overflow:"auto",whiteSpace:"pre-wrap"}}>
+              {"REACT RENDER ERROR:\n" + (this.state.error ? this.state.error.message + "\n\n" + this.state.error.stack : "Unknown error")}
+            </div>
+          );
+        }
+        return this.props.children;
+      }
+    }
 
     const app = firebase.initializeApp(FIREBASE_CONFIG);
     const db  = firebase.firestore();
@@ -1705,11 +1734,15 @@
             <div style={{position:"fixed",inset:0,zIndex:1,background:`rgba(0,0,0,${bgSettings.overlay})`}}/>
           )}
 
-          {/* Gate: show login screen if not authenticated */}
-          {!isAdmin ? (
-            <LoginGate bgSettings={bgSettings} onSuccess={()=>setIsAdmin(true)}/>
-          ) : (
-          <div style={{position:"relative",zIndex:2}}>
+          {/* Gate: position:fixed above bg, only shown when not logged in */}
+          {!isAdmin && (
+            <div style={{position:"fixed",inset:0,zIndex:10,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+              <LoginGate bgSettings={bgSettings} onSuccess={()=>setIsAdmin(true)}/>
+            </div>
+          )}
+
+          {/* All content — hidden when not logged in, visible when logged in */}
+          <div style={{position:"relative",zIndex:2,display:isAdmin?"block":"none"}}>
 
           {/* Header */}
           <div style={{background:bgSettings?.image?"rgba(255,255,255,0.88)":"#fff",backdropFilter:bgSettings?.image?"blur(12px)":"none",borderBottom:"1px solid rgba(240,240,240,0.8)",position:"sticky",top:0,zIndex:100}}>
@@ -1999,12 +2032,30 @@
           {showInsights && <InsightsModal items={items} seriesList={seriesList} allCats={allCategories} isAdmin={isAdmin} onClose={()=>setShowInsights(false)} onAddSeries={handleAddSeries} onDeleteSeries={handleDeleteSeries}/>}
           {showBgModal && <BackgroundModal current={bgSettings} onSave={handleSaveBg} onRemove={handleRemoveBg} onClose={()=>setShowBgModal(false)}/>}
           </div>{/* end content z-index wrapper */}
-          )}{/* end isAdmin gate */}
         </div>
       );
     }
 
-    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+    try {
+      ReactDOM.createRoot(document.getElementById("root")).render(
+        <ErrorBoundary><App/></ErrorBoundary>
+      );
+    } catch(e) {
+      var d = document.getElementById('err-display');
+      d.style.display = 'block';
+      d.textContent = 'REACT RENDER ERROR:\n' + e.message + '\n\n' + e.stack;
+    }
+    window._appLoaded = true;
+  </script>
+  <script>
+    // Detect if Babel script silently failed to execute
+    setTimeout(function() {
+      if (!window._appLoaded) {
+        var d = document.getElementById('err-display');
+        d.style.display = 'block';
+        d.textContent = 'BABEL PARSE ERROR: The script failed to compile. This usually means there is a JSX syntax error somewhere in the file. Check your browser console for details.';
+      }
+    }, 2000);
   </script>
 </body>
 </html>
